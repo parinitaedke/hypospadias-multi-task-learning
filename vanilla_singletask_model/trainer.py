@@ -9,10 +9,11 @@ import torch.nn.functional as F
 from torchmetrics import MetricCollection
 from torchmetrics import MeanSquaredError, MeanAbsoluteError, R2Score
 
+from utils.utils import save_checkpoint
+
 from PIL import Image
 import matplotlib.pyplot as plt
-
-
+from pathlib import Path
 
 class Trainer:
     def __init__(self, config, models, criterion, optimizers, schedulers):
@@ -169,6 +170,13 @@ class Trainer:
         # TODO : EDIT
         since = time.time()
 
+        saved_preds_dir = f'{wandb.run.dir}\saved_preds\\'
+        model_checkpoints_dir = f'{wandb.run.dir}\model_checkpoints\\'
+
+        Path(saved_preds_dir).mkdir(parents=True, exist_ok=True)
+        for bodypart in self.config['anatomy_part']:
+            Path(f'{model_checkpoints_dir}\\{bodypart}').mkdir(parents=True, exist_ok=True)
+
         for epoch in range(self.config['num_epochs']):
             print('Epoch:', epoch)
 
@@ -191,13 +199,9 @@ class Trainer:
             self.reset_metrics()
 
             # # save the model's weights if BinaryAUROC is higher than previous
-            # if self.config['save_weights'] and wandb.run.summary['valid_MulticlassAUROC'] > self.best_auroc:
-            #     print(f'valid MulticlassAUROC is improved {round(self.best_auroc, 4)} => '
-            #           f'{round(wandb.run.summary["valid_MulticlassAUROC"], 4)}, '
-            #           f'saving the model, epoch {self.global_epoch}')
-
-            #     torch.save(self.model.state_dict(), os.path.join(wandb.run.dir, 'model.pth'))
-            #     self.best_auroc = wandb.run.summary['valid_MulticlassAUROC']
+            if self.config['save_weights']:
+                for bodypart in self.config['anatomy_part']:
+                    save_checkpoint(state=self.models[bodypart], filename= f"{model_checkpoints_dir}{bodypart}\\model-{self.global_epoch}")
 
             self.global_epoch += 1
 
@@ -206,10 +210,10 @@ class Trainer:
         val_preds_df = pd.DataFrame.from_dict(self.val_preds)
         val_labels_df = pd.DataFrame.from_dict(self.val_labels)
 
-        train_preds_df.to_csv(os.path.join(wandb.run.dir, "train_preds.csv"), index=False)
-        train_labels_df.to_csv(os.path.join(wandb.run.dir, "train_labels.csv"), index=False)
-        val_preds_df.to_csv(os.path.join(wandb.run.dir, "val_preds.csv"), index=False)
-        val_labels_df.to_csv(os.path.join(wandb.run.dir, "val_labels.csv"), index=False)
+        train_preds_df.to_csv(f"{saved_preds_dir}train_preds.csv", index=False)
+        train_labels_df.to_csv(f"{saved_preds_dir}train_labels.csv", index=False)
+        val_preds_df.to_csv(f"{saved_preds_dir}val_preds.csv", index=False)
+        val_labels_df.to_csv(f"{saved_preds_dir}val_labels.csv", index=False)
 
         wandb.log({"Train predictions": wandb.Table(data=train_preds_df)})
         wandb.log({"Train labels": wandb.Table(data=train_labels_df)})
