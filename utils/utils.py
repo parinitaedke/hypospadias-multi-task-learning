@@ -12,6 +12,14 @@ import albumentations.pytorch as Apy
 from .loss import SteeperMSELoss, DiceLoss, InfluenceSegmentationLoss
 from .dataset import HypospadiasDataset
 
+def save_checkpoint(state, filename="my_checkpoint.pth.tar"):
+    print("=> Saving checkpoint")
+    torch.save(state, filename)
+
+def load_checkpoint(checkpoint, model):
+    print("=> Loading checkpoint")
+    model.load_state_dict(checkpoint["state_dict"])
+
 def get_transformations():
     data_transforms = {
         'train': A.Compose([
