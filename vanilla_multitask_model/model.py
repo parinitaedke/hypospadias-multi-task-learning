@@ -3,7 +3,7 @@ import torch.nn as nn
 import timm
 
 
-class Vanilla_Multiclass(nn.Module):
+class Vanilla_Multiclass_Model(nn.Module):
     def __init__(self, config):
         super().__init__()
 
