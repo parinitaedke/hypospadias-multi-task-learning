@@ -17,6 +17,11 @@ class Vanilla_Multiclass_Model(nn.Module):
         # create model for sharing
         self.model = timm.create_model(model_name, pretrained=config['pretrained'])
 
+        # freeze model
+        if config['freeze']:
+            submodules = [n for n, _ in self.model.named_children()]
+            timm.freeze(self.model, submodules[:submodules.index(config['freeze_until']) + 1])
+
         # G head
         self.g_head = nn.Sequential(
             nn.Linear(in_features=1000, out_features=512),
