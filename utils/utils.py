@@ -12,6 +12,8 @@ import albumentations.pytorch as Apy
 from .loss import SteeperMSELoss, DiceLoss, InfluenceSegmentationLoss
 from .dataset import HypospadiasDataset
 
+from vanilla_multitask_model.model import Vanilla_Multitask_Model
+
 def save_checkpoint(state, filename="my_checkpoint.pth.tar"):
     print("=> Saving checkpoint")
     torch.save(state, filename)
@@ -69,6 +71,9 @@ def build_model(config):
                 timm.freeze(model, submodules[:submodules.index(config['freeze_until']) + 1])
             
             models[body_part] = model
+
+    elif config['model_type'].startswith('vanilla-multitask'):
+        models = Vanilla_Multitask_Model(config=config)
 
     return models
 
