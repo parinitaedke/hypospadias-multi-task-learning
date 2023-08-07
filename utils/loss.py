@@ -25,15 +25,19 @@ class DiceLoss(nn.Module):
         super(DiceLoss, self).__init__()
 
     def forward(self, inputs, targets, smooth=1):
-
-        inputs = F.sigmoid(inputs)
+        # inputs = torch.sigmoid(inputs)
 
         inputs = inputs.view(-1)
         targets = targets.view(-1)
 
-        intersection = (inputs * targets).sum()
-        dice = (2. * intersection + smooth)/(inputs.sum() + targets.sum() + smooth)
+        intersection = np.logical_not(np.logical_xor(inputs, targets)).sum()
 
+        numerator = 2 * intersection + smooth
+        denominator = torch.numel(inputs) + torch.numel(targets) + smooth
+
+        # print(f'Numerator: {numerator}, denominator: {denominator}')
+
+        dice = numerator / denominator
         return 1 - dice
 
 
