@@ -62,7 +62,10 @@ class HypospadiasDataset(Dataset):
             assert len(mask_path) <= 1
 
             if len(mask_path) == 1:
+                # The '.convert("L") makes the mask into a grayscale image (i.e. 1 channel)
                 mask = np.array(Image.open(mask_path[0]).convert("L"))
+
+                # This ensures that the mask range [0, 255] becomes [0, 1]
                 mask[mask == 255] = 1
                 
             else:
