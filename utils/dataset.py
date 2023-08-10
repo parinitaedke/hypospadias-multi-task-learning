@@ -63,9 +63,12 @@ class HypospadiasDataset(Dataset):
 
             if len(mask_path) == 1:
                 mask = np.array(Image.open(mask_path[0]).convert("L"))
+                mask[mask == 255] = 1
                 
             else:
                 mask = np.zeros((img.shape[0], img.shape[1]))
+
+            assert torch.all(torch.isin(mask, torch.tensor([0, 1]))) == True
 
             masks.append(mask)
             
