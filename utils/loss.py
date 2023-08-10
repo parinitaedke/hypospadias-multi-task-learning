@@ -19,6 +19,27 @@ class SteeperMSELoss(nn.Module):
    
         return self.coefficient * loss
     
+class WeightedSoftDiceLoss(nn.Module):
+    def __init__(self, config):
+        super(WeightedSoftDiceLoss, self).__init__()
+        # 0 <= v1 <= v2 <= 1; v2 = 1 - v1;
+        self.v1 = config['weighted_soft_dice_v1']
+        self.v2 = 1 - self.v1
+    def forward(self, inputs, targets, smooth=1):
+        inputs = inputs.view(-1)
+        targets = targets.view(-1)
+
+        W = (targets * (self.v2 - self.v1)) + self.v1
+        G_hat = W * (2 * inputs - 1)
+        G = W * (2 * targets - 1)
+
+        numerator = 2*(G_hat * G).sum() + smooth
+        denominator = (G_hat**2).sum() + (G**2).sum() + smooth
+
+        ws_dice = numerator/denominator
+
+        return 1 - ws_dice
+
 
 class DiceLoss(nn.Module):
     def __init__(self, weight=None, size_average=True):
@@ -50,19 +71,25 @@ class DiceLoss(nn.Module):
         return true_positives, false_positives, true_negatives, false_negatives
 
     def forward(self, inputs, targets, smooth=1):
+        # # Uncomment this if the final layer does not have an activation layer
         # inputs = torch.sigmoid(inputs)
 
         inputs = inputs.view(-1)
         targets = targets.view(-1)
 
-        TP, FP, TN, FN = self._confusion(inputs, targets)
-        numerator = 2 * TP + smooth
-        denominator = 2 * TP + FP + FN + smooth
+        intersection = (inputs * targets).sum()
+        numerator = (2. * intersection + smooth)
+        denominator = (inputs.sum() + targets.sum() + smooth)
         dice = numerator / denominator
 
-        # print(f'Numerator: {numerator}, denominator: {denominator}')
+        # # Approach #2 -- Using the confusion matrix to calculate the dice score
+        # TP, FP, TN, FN = self._confusion(inputs, targets)
+        # numerator = 2 * TP + smooth
+        # denominator = 2 * TP + FP + FN + smooth
+        # dice = numerator / denominator
+        # # print(f'Numerator: {numerator}, denominator: {denominator}')
+        # dice = numerator / denominator
 
-        dice = numerator / denominator
         return 1 - dice
 
 
