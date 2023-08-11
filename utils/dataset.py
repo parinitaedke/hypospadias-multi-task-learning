@@ -65,8 +65,8 @@ class HypospadiasDataset(Dataset):
                 # The '.convert("L") makes the mask into a grayscale image (i.e. 1 channel)
                 mask = np.array(Image.open(mask_path[0]).convert("L"))
 
-                # This ensures that the mask range [0, 255] becomes [0, 1]
-                mask[mask == 255] = 1
+                # This ensures that the mask range [0, 255] becomes {0, 1}
+                mask[mask > 0] = 1
                 
             else:
                 mask = np.zeros((img.shape[0], img.shape[1]))
