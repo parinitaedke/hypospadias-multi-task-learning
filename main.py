@@ -7,6 +7,7 @@ import numpy as np
 from utils.utils import get_transformations, build_model, setup_dataloader, setup_criterion
 from vanilla_singletask_model.trainer import Trainer as VSTMT
 from vanilla_multitask_model.trainer import Trainer as VMTMT
+from multitask_w_seghead_model.trainer import Trainer as MTUNetSegMT
 from torch.optim.lr_scheduler import ExponentialLR
 
 # set up random seed for reproducibility
@@ -26,15 +27,18 @@ def run_experiment():
         'num_workers': 0,  # anything > 0 is giving issues -- why?
         'pin_memory': True,
         'num_epochs': 40,
-        'loss': 'SteeperMSE',     # 'MSE, 'SteeperMSE', 'CE', 'MT-indep-seghead-loss', 'MT-new-seghead-loss'
+        'loss': 'MT-indep-seghead-loss',     # 'MSE, 'SteeperMSE', 'CE', 'MT-indep-seghead-loss', 'MT-new-seghead-loss'
         'steeper_MSE_coeff': 10,
-        'model_type': 'vanilla-singletask',
+        'model_type': 'multitask_UNET_segmentation',
         'model_name': 'vit_base',   # 'swin'/'vit' + '_'  + 'small', 'tiny', 'base' || 'resnet' + '18'/'50'
         'lr': 0.01,
         'weight_decay': 0.001,
         'gamma': 0.85,
         'num_classes': [1, 1, 1],           # 4/5
         'anatomy_part': ['Glans', 'Meatus', 'Shaft'],
+        'in_channels': 3,
+        'out_channels': 1,
+        'UNET features': [64, 128, 256, 512],
         'freeze': False,
         'freeze_until': 'layer3',
         'device': torch.device("cuda" if torch.cuda.is_available() else "cpu"),     # 'cuda'
@@ -83,10 +87,23 @@ def run_experiment():
             train_loader, valid_loader
         )
 
+    elif wandb.config['model_type'].startswith('multitask_UNET_segmentation'):
+        models = models.to(wandb.config['device'])
+
+        optimizers = torch.optim.Adam(params=models.parameters(), lr=wandb.config['lr'],
+                                      weight_decay=wandb.config['weight_decay'])
+        schedulers = ExponentialLR(optimizers, gamma=wandb.config['gamma'])
+
+        MTUNetSegMT(config=wandb.config, models=models, criterion=criterion, optimizers=optimizers,
+              schedulers=schedulers).run(
+            train_loader, valid_loader
+        )
+
+
 if __name__ == '__main__':
 
     # init wandb
-    wandb.init(project="vanilla-singletask-model")
+    wandb.init(project="multitask-UNET-segmentation-model")
 
     # run experiment
     run_experiment()
