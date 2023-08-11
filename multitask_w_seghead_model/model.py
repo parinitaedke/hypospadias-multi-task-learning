@@ -20,13 +20,14 @@ class DoubleConv(nn.Module):
 
 
 class Vanilla_Multitask_UNET_Segmentation_Model(nn.Module):
-    def __init__(self, in_channels=3, out_channels=1, features=[64, 128, 256, 512], testing=False):
+    def __init__(self, config, testing=False):
         super(Vanilla_Multitask_UNET_Segmentation_Model, self).__init__()
         self.downs = nn.ModuleList()
         self.ups = nn.ModuleList()
 
+        in_channels = config["in_channels"]
         # Down part of UNET
-        for feature in features:
+        for feature in config["UNET features"]:
             self.downs.append(DoubleConv(in_channels, feature))
             in_channels = feature
 
@@ -34,15 +35,15 @@ class Vanilla_Multitask_UNET_Segmentation_Model(nn.Module):
         self.pool = nn.MaxPool2d(kernel_size=2, stride=2)
 
         # Bottleneck layer
-        self.bottleneck = DoubleConv(features[-1], features[-1] * 2)
+        self.bottleneck = DoubleConv(config["UNET features"][-1], config["UNET features"][-1] * 2)
 
         # Up part of UNET
-        for feature in reversed(features):
+        for feature in reversed(config["UNET features"]):
             self.ups.append(nn.ConvTranspose2d(feature*2, feature, kernel_size=2, stride=2))
             self.ups.append(DoubleConv(feature*2, feature))
 
         # Final convolution
-        self.final_conv = nn.Conv2d(features[0], out_channels, kernel_size=1)
+        self.final_conv = nn.Conv2d(config["UNET features"][0], config["out_channels"], kernel_size=1)
 
         self.testing = testing
         self.dropout = nn.Dropout(p=0.5)
@@ -127,5 +128,5 @@ class Vanilla_Multitask_UNET_Segmentation_Model(nn.Module):
         # Classifier
         x = self.final_conv(x)
 
-        return x, g_score, m_score, s_score
+        return x, (g_score, m_score, s_score)
 
