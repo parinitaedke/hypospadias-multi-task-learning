@@ -26,6 +26,9 @@ class WeightedSoftDiceLoss(nn.Module):
         self.v1 = config['weighted_soft_dice_v1']
         self.v2 = 1 - self.v1
     def forward(self, inputs, targets, smooth=1):
+        # Uncomment this if the final layer does not have an activation layer
+        inputs = torch.sigmoid(inputs)
+
         inputs = inputs.view(-1)
         targets = targets.view(-1)
 
@@ -71,8 +74,8 @@ class DiceLoss(nn.Module):
         return true_positives, false_positives, true_negatives, false_negatives
 
     def forward(self, inputs, targets, smooth=1):
-        # # Uncomment this if the final layer does not have an activation layer
-        # inputs = torch.sigmoid(inputs)
+        # Uncomment this if the final layer does not have an activation layer
+        inputs = torch.sigmoid(inputs)
 
         inputs = inputs.view(-1)
         targets = targets.view(-1)
