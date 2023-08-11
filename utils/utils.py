@@ -13,6 +13,7 @@ from .loss import SteeperMSELoss, DiceLoss, InfluenceSegmentationLoss
 from .dataset import HypospadiasDataset
 
 from vanilla_multitask_model.model import Vanilla_Multitask_Model
+from multitask_w_seghead_model.model import Vanilla_Multitask_UNET_Segmentation_Model
 
 def save_checkpoint(state, filename="my_checkpoint.pth.tar"):
     print("=> Saving checkpoint")
@@ -74,6 +75,9 @@ def build_model(config):
 
     elif config['model_type'].startswith('vanilla-multitask'):
         models = Vanilla_Multitask_Model(config=config)
+
+    elif config['model_type'].startswith('multitask_UNET_segmentation'):
+        models = Vanilla_Multitask_UNET_Segmentation_Model(config=config)
 
     return models
 
