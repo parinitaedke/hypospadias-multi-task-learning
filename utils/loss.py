@@ -78,7 +78,7 @@ class DiceLoss(nn.Module):
         inputs = torch.sigmoid(inputs)
 
         inputs = inputs.view(-1)
-        targets = targets.view(-1)
+        targets = targets.contiguous().view(-1)
 
         intersection = (inputs * targets).sum()
         numerator = (2. * intersection + smooth)
