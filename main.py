@@ -10,6 +10,12 @@ from vanilla_multitask_model.trainer import Trainer as VMTMT
 from multitask_w_seghead_model.trainer import Trainer as MTUNetSegMT
 from torch.optim.lr_scheduler import ExponentialLR
 
+# empty cuda cache
+torch.cuda.empty_cache()
+
+# TODO: To check if this helps with the memory issue
+os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "max_split_size_mb:512"
+
 # set up random seed for reproducibility
 torch.manual_seed(2023)
 random.seed(2023)
@@ -26,7 +32,7 @@ def run_experiment():
         'batch_size': 2,
         'num_workers': 0,  # anything > 0 is giving issues -- why?
         'pin_memory': True,
-        'num_epochs': 40,
+        'num_epochs': 1,
         'loss': 'MT-indep-seghead-loss',     # 'MSE, 'SteeperMSE', 'CE', 'MT-indep-seghead-loss', 'MT-new-seghead-loss'
         'steeper_MSE_coeff': 10,
         'model_type': 'multitask_UNET_segmentation',
@@ -37,7 +43,7 @@ def run_experiment():
         'num_classes': [1, 1, 1],           # 4/5
         'anatomy_part': ['Glans', 'Meatus', 'Shaft'],
         'in_channels': 3,
-        'out_channels': 1,
+        'out_channels': 3,
         'UNET features': [64, 128, 256, 512],
         'freeze': False,
         'freeze_until': 'layer3',
