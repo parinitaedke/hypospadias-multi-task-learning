@@ -71,7 +71,7 @@ class HypospadiasDataset(Dataset):
             else:
                 mask = np.zeros((img.shape[0], img.shape[1]))
 
-            assert torch.all(torch.isin(mask, torch.tensor([0, 1]))) == True
+            assert torch.all(torch.isin(torch.tensor(mask), torch.tensor([0, 1]))) == True
 
             masks.append(mask)
             
