@@ -36,7 +36,7 @@ class Trainer:
                                                        ])
         self.ys = []
         self.y_preds = []
-        self.losses = []
+        self.classification_losses = []
 
         self.train_preds = {'epoch': []}
         self.train_labels = {'epoch': []}
@@ -44,7 +44,7 @@ class Trainer:
         self.val_preds = {'epoch': []}
         self.val_labels = {'epoch': []}
 
-    def update_metrics(self, y_pred, y, loss):
+    def update_metrics(self, y_pred, y, classification_loss):
         # move variables to cpu
         y_pred = torch.stack(y_pred).squeeze(2).detach().cpu()
         y = y.detach().cpu()
@@ -52,7 +52,7 @@ class Trainer:
         # save predictions, targets and losses
         self.ys.append(y)
         self.y_preds.append(y_pred)
-        self.losses.append(loss)
+        self.classification_losses.append(classification_loss)
 
         # update metrics
         for i, bodypart in enumerate(self.config['anatomy_part']):
@@ -60,12 +60,12 @@ class Trainer:
 
     def log_metrics(self, train):
 
-        mean_bodypart_losses = np.asarray(self.losses).mean(axis=0)
+        mean_bodypart_classification_losses = np.asarray(self.classification_losses).mean(axis=0)
 
         # log loss and calculate metrics over all batches
         for i, bodypart in enumerate(self.config['anatomy_part']):
 
-            wandb.log({f"{train}_{bodypart}_loss": mean_bodypart_losses[i], 'epoch': self.global_epoch})
+            wandb.log({f"{train}_{bodypart}_classification_loss": mean_bodypart_classification_losses[i], 'epoch': self.global_epoch})
 
             metrics = self.metrics[bodypart].compute()
 
@@ -76,7 +76,8 @@ class Trainer:
     def reset_metrics(self):
         self.ys = []
         self.y_preds = []
-        self.losses = []
+        self.classification_losses = []
+        
         for bodypart in self.config['anatomy_part']:
             self.metrics[bodypart].reset()
 
@@ -96,37 +97,46 @@ class Trainer:
 
             y_seg_pred, y_score_preds = self.models(X)
 
-            losses = []
+            classification_losses, seg_losses = [], []
 
-            # # Calculating the segmentation loss per mask type
-            # lst_seg_pred = torch.split(y_seg_pred, 1, dim=1)  # Splits on the channel dimension
-            # lst_gt_mask = torch.split(mask, 1, dim=1)  # Splits on the channel dimension
-            #
-            # assert len(lst_gt_mask) == len(lst_gt_mask)
-            #
-            # seg_losses = []
-            # for i in range(len(lst_gt_mask)):
-            #     seg_loss = self.criterion[0](lst_seg_pred[i], lst_gt_mask[i])
-            #     seg_losses.append(seg_loss)
+            # calculating the segmentation loss per mask type
+            lst_seg_pred = torch.split(y_seg_pred, 1, dim=1)  # Splits on the channel dimension
+            lst_gt_mask = torch.split(mask, 1, dim=1)  # Splits on the channel dimension
+            
+            assert len(lst_gt_mask) == len(lst_gt_mask)
+            
+            for i in range(len(lst_gt_mask)):
+                seg_loss = self.criterion[0](lst_seg_pred[i], lst_gt_mask[i])
+                seg_losses.append(seg_loss)
 
-            # TODO: Calculating the segmentation loss for all masks -- does this affect the running out of GPU space
-            seg_loss = self.criterion[0](y_seg_pred, mask)
+            # calculating the segmentation loss for all masks
+            total_loss = torch.sum(torch.stack(seg_losses), dim=0)
+            
+            # zero gradient and optimize model with segmentation loss
+            self.models.zero_grad()
+            total_loss.backward(retain_graph=True)
+            self.optimizers.step()
+            
+            self.global_step += 1
 
 
             # Calculating the classification loss
             for j, bodypart in enumerate(self.config['anatomy_part']):
                 loss = self.criterion[1](y_score_preds[j].flatten(), y[j].float())
-                losses.append(loss)
+                classification_losses.append(loss)
 
-            total_loss = torch.sum(torch.stack(losses), dim=0)
+            total_loss = torch.sum(torch.stack(classification_losses), dim=0)
+            total_classification_loss = torch.sum(torch.stack(classification_losses), dim=0)
 
             # calculate loss and optimize model
             self.models.zero_grad()
             total_loss.backward()
             self.optimizers.step()
+            
+            self.global_step += 1
 
             # log batch loss
-            wandb.log({f'batch_loss': total_loss.item(), 'step': self.global_step})
+            wandb.log({f'batch_classification_loss': total_classification_loss.item(), 'step': self.global_step})
 
             # save train preds
             for j, bodypart in enumerate(self.config['anatomy_part']):
@@ -140,18 +150,14 @@ class Trainer:
                     self.train_preds[f'{name}-{bodypart}'].append(name_pred.item())
                     self.train_labels[f'{name}-{bodypart}'].append(name_y.item())
 
-            self.global_step += 1
-
             # TODO: save the segmentation maps per epoch to see how they evolve
 
 
         # log learning rate and update learning rate
-        wandb.log({f'learning_rate': self.optimizers.param_groups[0]['lr'],
-                   'epoch': self.global_epoch})
+        wandb.log({f'learning_rate': self.optimizers.param_groups[0]['lr'], 'epoch': self.global_epoch})
         self.schedulers.step()
 
     def validate_epoch(self, data_loader, data_mode='val'):
-        # TODO : EDIT
 
         # set model to evaluation mode
         self.models.eval()
@@ -165,28 +171,24 @@ class Trainer:
                 mask = mask.to(self.device)
 
                 # calculate y_pred
-                # y_pred = self.model(X).reshape(-1)
                 y_seg_pred, y_score_preds = self.models(X)
 
-                losses = []
+                classification_losses, seg_losses = [], []
 
-                # Calculating the segmentation loss
-                lst_seg_pred = torch.split(y_seg_pred, 1, dim=2)  # TODO: check which dimension to split on
-                lst_gt_mask = torch.split(mask, 1, dim=2)  # TODO: check which dimension to split on
+                # calculating the segmentation loss per mask type
+                lst_seg_pred = torch.split(y_seg_pred, 1, dim=1)  # splits on the channel dimension
+                lst_gt_mask = torch.split(mask, 1, dim=1)  # splits on the channel dimension
 
                 assert len(lst_gt_mask) == len(lst_gt_mask)
 
-                seg_losses = []
                 for i in range(len(lst_gt_mask)):
                     seg_loss = self.criterion[0](lst_seg_pred[i], lst_gt_mask[i])
                     seg_losses.append(seg_loss)
-
+                    
                 # Calculating the classification loss
                 for j, bodypart in enumerate(self.config['anatomy_part']):
                     loss = self.criterion[1](y_score_preds[j].flatten(), y[j].float())
-                    losses.append(loss.item())
-
-                total_loss = torch.sum(torch.stack(losses), dim=0)
+                    classification_losses.append(loss.cpu())
 
                 # save val preds
                 for j, bodypart in enumerate(self.config['anatomy_part']):
@@ -199,7 +201,7 @@ class Trainer:
                         self.val_labels[f'{data_mode}_{name}-{bodypart}'].append(y[j][k].item())
 
             # add batch predictions, ground truth and loss to metrics
-            self.update_metrics(y_score_preds, y, losses)
+            self.update_metrics(y_score_preds, y, classification_losses)
 
     def run(self, train_loader, valid_loader):
         # TODO : EDIT
