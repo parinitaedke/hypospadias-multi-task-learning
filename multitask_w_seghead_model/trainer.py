@@ -8,6 +8,7 @@ import torch
 import torch.nn.functional as F
 from torchmetrics import MetricCollection
 from torchmetrics import MeanSquaredError, MeanAbsoluteError, R2Score
+import torchvision
 
 from utils.utils import save_checkpoint
 
@@ -151,6 +152,14 @@ class Trainer:
                     self.train_labels[f'{name}-{bodypart}'].append(name_y.item())
 
             # TODO: save the segmentation maps per epoch to see how they evolve
+            for i in range(len(lst_seg_pred)):
+                batch_split_pred = torch.split(lst_seg_pred[i], 1, dim=0)  # split by batches to get msk prediction for each sample for a specific bodypart
+                batch_split_gt = torch.split(lst_gt_mask[i], 1, dim=0)
+                
+                for b_, name in enumerate(names):
+                    torchvision.utils.save_image(batch_split_pred[b_], f"{self.saved_img_preds_dir}/Train/{name}-{self.config['anatomy_part'][i]}-pred.png")
+                    torchvision.utils.save_image(batch_split_gt[b_].float(), f"{self.saved_img_preds_dir}/Train/{name}-{self.config['anatomy_part'][i]}-gt.png")
+                    
 
 
         # log learning rate and update learning rate
@@ -190,15 +199,25 @@ class Trainer:
                     loss = self.criterion[1](y_score_preds[j].flatten(), y[j].float())
                     classification_losses.append(loss.cpu())
 
-                # save val preds
-                for j, bodypart in enumerate(self.config['anatomy_part']):
-                    for k, name in enumerate(names):
-                        if f'{data_mode}_{name}-{bodypart}' not in self.val_preds:
-                            self.val_preds[f'{data_mode}_{name}-{bodypart}'] = []
-                            self.val_labels[f'{data_mode}_{name}-{bodypart}'] = []
+            # save val preds
+            for j, bodypart in enumerate(self.config['anatomy_part']):
+                for k, name in enumerate(names):
+                    if f'{data_mode}_{name}-{bodypart}' not in self.val_preds:
+                        self.val_preds[f'{data_mode}_{name}-{bodypart}'] = []
+                        self.val_labels[f'{data_mode}_{name}-{bodypart}'] = []
 
-                        self.val_preds[f'{data_mode}_{name}-{bodypart}'].append(y_score_preds[j][k].item())
-                        self.val_labels[f'{data_mode}_{name}-{bodypart}'].append(y[j][k].item())
+                    self.val_preds[f'{data_mode}_{name}-{bodypart}'].append(y_score_preds[j][k].item())
+                    self.val_labels[f'{data_mode}_{name}-{bodypart}'].append(y[j][k].item())
+                    
+            # TODO: save the segmentation maps per epoch to see how they evolve
+            for i in range(len(lst_seg_pred)):
+                batch_split_pred = torch.split(lst_seg_pred[i], 1, dim=0)  # split by batches to get msk prediction for each sample for a specific bodypart
+                batch_split_gt = torch.split(lst_gt_mask[i], 1, dim=0)
+                
+                for b_, name in enumerate(names):
+                    torchvision.utils.save_image(batch_split_pred[b_], f"{self.saved_img_preds_dir}/Val/{data_mode}-{name}-{self.config['anatomy_part'][i]}-pred.png")
+                    torchvision.utils.save_image(batch_split_gt[b_].float(), f"{self.saved_img_preds_dir}/Val/{data_mode}-{name}-{self.config['anatomy_part'][i]}-gt.png")    
+                
 
             # add batch predictions, ground truth and loss to metrics
             self.update_metrics(y_score_preds, y, classification_losses)
@@ -208,11 +227,14 @@ class Trainer:
         since = time.time()
 
         # Make saved preds and checkpoints directory
-        saved_preds_dir = f'{wandb.run.dir}\saved_preds\\'
-        model_checkpoints_dir = f'{wandb.run.dir}\model_checkpoints\\'
+        self.saved_preds_dir = f'{wandb.run.dir}/saved_preds'
+        self.model_checkpoints_dir = f'{wandb.run.dir}/model_checkpoints'
+        self.saved_img_preds_dir = f'{wandb.run.dir}/saved_img_preds'
 
-        Path(saved_preds_dir).mkdir(parents=True, exist_ok=True)
-        Path(model_checkpoints_dir).mkdir(parents=True, exist_ok=True)
+        Path(self.saved_preds_dir).mkdir(parents=True, exist_ok=True)
+        Path(self.model_checkpoints_dir).mkdir(parents=True, exist_ok=True)
+        Path(f'{self.saved_img_preds_dir}/Train').mkdir(parents=True, exist_ok=True)
+        Path(f'{self.saved_img_preds_dir}/Val').mkdir(parents=True, exist_ok=True)
 
         for epoch in range(self.config['num_epochs']):
             print('Epoch:', epoch)
@@ -237,7 +259,7 @@ class Trainer:
 
             # # save the model's weights if BinaryAUROC is higher than previous
             if self.config['save_weights']:
-                save_checkpoint(state=self.models, filename=f"{model_checkpoints_dir}model-{self.global_epoch}")
+                save_checkpoint(state=self.models, filename=f"{self.model_checkpoints_dir}/model-{self.global_epoch}")
 
             self.global_epoch += 1
 
@@ -246,10 +268,10 @@ class Trainer:
         val_preds_df = pd.DataFrame.from_dict(self.val_preds)
         val_labels_df = pd.DataFrame.from_dict(self.val_labels)
 
-        train_preds_df.to_csv(f"{saved_preds_dir}train_preds.csv", index=False)
-        train_labels_df.to_csv(f"{saved_preds_dir}train_labels.csv", index=False)
-        val_preds_df.to_csv(f"{saved_preds_dir}val_preds.csv", index=False)
-        val_labels_df.to_csv(f"{saved_preds_dir}val_labels.csv", index=False)
+        train_preds_df.to_csv(f"{self.saved_preds_dir}/train_preds.csv", index=False)
+        train_labels_df.to_csv(f"{self.saved_preds_dir}/train_labels.csv", index=False)
+        val_preds_df.to_csv(f"{self.saved_preds_dir}/val_preds.csv", index=False)
+        val_labels_df.to_csv(f"{self.saved_preds_dir}/val_labels.csv", index=False)
 
         wandb.log({"Train predictions": wandb.Table(data=train_preds_df)})
         wandb.log({"Train labels": wandb.Table(data=train_labels_df)})
