@@ -3,7 +3,7 @@ import numpy as np
 import pandas as pd
 from pathlib import Path
 from glob import glob
-from PIL import Image
+from PIL import Image, ImageOps
 import torch
 from torch.utils.data import Dataset
 
@@ -12,8 +12,8 @@ class HypospadiasDataset(Dataset):
         super().__init__()
         self.config = config
         
-        self.image_dir = fr'{config["data_path"]}\{dataset_type}\images'
-        self.mask_dir = fr'{config["data_path"]}\{dataset_type}\masks'
+        self.image_dir = fr'{config["data_path"]}/{dataset_type}/images'
+        self.mask_dir = fr'{config["data_path"]}/{dataset_type}/masks'
         self.images = os.listdir(self.image_dir)
         
         self.score_df = score_df
@@ -32,7 +32,7 @@ class HypospadiasDataset(Dataset):
         # print(img_name)
 
         # Open the image in RGB mode
-        img = np.asarray(Image.open(img_path).convert("RGB"))
+        img = np.asarray(ImageOps.exif_transpose(Image.open(img_path)).convert("RGB"))
 
         if self.config["debug"]:
             print(f'[1] img shape: {img.shape}')
@@ -63,7 +63,7 @@ class HypospadiasDataset(Dataset):
 
             if len(mask_path) == 1:
                 # The '.convert("L") makes the mask into a grayscale image (i.e. 1 channel)
-                mask = np.array(Image.open(mask_path[0]).convert("L"))
+                mask = np.array(ImageOps.exif_transpose(Image.open(mask_path[0])).convert("L"))
 
                 # This ensures that the mask range [0, 255] becomes {0, 1}
                 mask[mask > 0] = 1
