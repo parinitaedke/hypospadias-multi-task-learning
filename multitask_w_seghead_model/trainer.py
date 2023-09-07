@@ -82,43 +82,53 @@ class Trainer:
         for bodypart in self.config['anatomy_part']:
             self.metrics[bodypart].reset()
 
-    def train_epoch(self, data_loader):
+    def train_epoch(self, data_loader, include_mask=True):
 
         # set model to train mode
         self.models.train()
 
-        self.train_preds['epoch'].append(self.global_epoch)
-        self.train_labels['epoch'].append(self.global_epoch)
+        if self.global_epoch not in self.train_preds['epoch'] and self.global_epoch not in self.train_labels['epoch']:
+            self.train_preds['epoch'].append(self.global_epoch)
+            self.train_labels['epoch'].append(self.global_epoch)
 
-        for i, (names, X, y, mask) in enumerate(tqdm(data_loader)):
+        for i, batch in enumerate(tqdm(data_loader)):
+            if include_mask:
+                names, X, y, mask = batch
+            else:
+                names, X, y = batch
+                
             # move everything to cuda
             X = X.to(self.device)
             y = torch.stack(y).to(self.device)
-            mask = mask.to(self.device)
+            
+            if include_mask:
+                mask = mask.to(self.device)
 
             y_seg_pred, y_score_preds = self.models(X)
 
             classification_losses, seg_losses = [], []
-
-            # calculating the segmentation loss per mask type
+ 
             lst_seg_pred = torch.split(y_seg_pred, 1, dim=1)  # Splits on the channel dimension
-            lst_gt_mask = torch.split(mask, 1, dim=1)  # Splits on the channel dimension
             
-            assert len(lst_gt_mask) == len(lst_gt_mask)
-            
-            for i in range(len(lst_gt_mask)):
-                seg_loss = self.criterion[0](lst_seg_pred[i], lst_gt_mask[i])
-                seg_losses.append(seg_loss)
+            if include_mask:
+                # calculating the segmentation loss per mask type
+                lst_gt_mask = torch.split(mask, 1, dim=1)  # Splits on the channel dimension
+                
+                assert len(lst_gt_mask) == len(lst_gt_mask)
+                
+                for i in range(len(lst_gt_mask)):
+                    seg_loss = self.criterion[0](lst_seg_pred[i], lst_gt_mask[i])
+                    seg_losses.append(seg_loss)
 
-            # calculating the segmentation loss for all masks
-            total_loss = torch.sum(torch.stack(seg_losses), dim=0)
-            
-            # zero gradient and optimize model with segmentation loss
-            self.models.zero_grad()
-            total_loss.backward(retain_graph=True)
-            self.optimizers.step()
-            
-            self.global_step += 1
+                # calculating the segmentation loss for all masks
+                total_loss = torch.sum(torch.stack(seg_losses), dim=0)
+                
+                # zero gradient and optimize model with segmentation loss
+                self.models.zero_grad()
+                total_loss.backward(retain_graph=True)
+                self.optimizers.step()
+                
+                self.global_step += 1
 
 
             # Calculating the classification loss
@@ -154,11 +164,15 @@ class Trainer:
             # TODO: save the segmentation maps per epoch to see how they evolve
             for i in range(len(lst_seg_pred)):
                 batch_split_pred = torch.split(lst_seg_pred[i], 1, dim=0)  # split by batches to get msk prediction for each sample for a specific bodypart
-                batch_split_gt = torch.split(lst_gt_mask[i], 1, dim=0)
+                
+                if include_mask:
+                    batch_split_gt = torch.split(lst_gt_mask[i], 1, dim=0)
                 
                 for b_, name in enumerate(names):
-                    torchvision.utils.save_image(batch_split_pred[b_], f"{self.saved_img_preds_dir}/Train/{name}-{self.config['anatomy_part'][i]}-pred.png")
-                    torchvision.utils.save_image(batch_split_gt[b_].float(), f"{self.saved_img_preds_dir}/Train/{name}-{self.config['anatomy_part'][i]}-gt.png")
+                    torchvision.utils.save_image(batch_split_pred[b_].sigmoid(), f"{self.saved_img_preds_dir}/Train/{name}-{self.config['anatomy_part'][i]}-pred.png")
+                    
+                    if include_mask:
+                        torchvision.utils.save_image(batch_split_gt[b_].float(), f"{self.saved_img_preds_dir}/Train/{name}-{self.config['anatomy_part'][i]}-gt.png")
                     
 
 
@@ -166,18 +180,26 @@ class Trainer:
         wandb.log({f'learning_rate': self.optimizers.param_groups[0]['lr'], 'epoch': self.global_epoch})
         self.schedulers.step()
 
-    def validate_epoch(self, data_loader, data_mode='val'):
-
+    def validate_epoch(self, data_loader, data_mode='val', include_mask=True):
+        # TODO: EDIT THIS FOR ADDITIONAL TRAIN LOADERS
+        
         # set model to evaluation mode
         self.models.eval()
 
-        for i, (names, X, y, mask) in enumerate(tqdm(data_loader)):
+        for i, batch in enumerate(tqdm(data_loader)):
+            
+            if not include_mask and data_mode=='train':
+                names, X, y = batch
+            else:
+                names, X, y, mask = batch
 
             with torch.no_grad():
                 # move everything to cuda
                 X = X.to(self.device)
                 y = torch.stack(y).to(self.device)
-                mask = mask.to(self.device)
+                
+                if include_mask or not data_mode=='train':
+                    mask = mask.to(self.device)
 
                 # calculate y_pred
                 y_seg_pred, y_score_preds = self.models(X)
@@ -186,13 +208,15 @@ class Trainer:
 
                 # calculating the segmentation loss per mask type
                 lst_seg_pred = torch.split(y_seg_pred, 1, dim=1)  # splits on the channel dimension
-                lst_gt_mask = torch.split(mask, 1, dim=1)  # splits on the channel dimension
+                
+                if include_mask:
+                    lst_gt_mask = torch.split(mask, 1, dim=1)  # splits on the channel dimension
 
-                assert len(lst_gt_mask) == len(lst_gt_mask)
+                    assert len(lst_gt_mask) == len(lst_gt_mask)
 
-                for i in range(len(lst_gt_mask)):
-                    seg_loss = self.criterion[0](lst_seg_pred[i], lst_gt_mask[i])
-                    seg_losses.append(seg_loss)
+                    for i in range(len(lst_gt_mask)):
+                        seg_loss = self.criterion[0](lst_seg_pred[i], lst_gt_mask[i])
+                        seg_losses.append(seg_loss)
                     
                 # Calculating the classification loss
                 for j, bodypart in enumerate(self.config['anatomy_part']):
@@ -212,17 +236,19 @@ class Trainer:
             # TODO: save the segmentation maps per epoch to see how they evolve
             for i in range(len(lst_seg_pred)):
                 batch_split_pred = torch.split(lst_seg_pred[i], 1, dim=0)  # split by batches to get msk prediction for each sample for a specific bodypart
-                batch_split_gt = torch.split(lst_gt_mask[i], 1, dim=0)
+                if include_mask:
+                    batch_split_gt = torch.split(lst_gt_mask[i], 1, dim=0)
                 
                 for b_, name in enumerate(names):
-                    torchvision.utils.save_image(batch_split_pred[b_], f"{self.saved_img_preds_dir}/Val/{data_mode}-{name}-{self.config['anatomy_part'][i]}-pred.png")
-                    torchvision.utils.save_image(batch_split_gt[b_].float(), f"{self.saved_img_preds_dir}/Val/{data_mode}-{name}-{self.config['anatomy_part'][i]}-gt.png")    
+                    torchvision.utils.save_image(batch_split_pred[b_].sigmoid(), f"{self.saved_img_preds_dir}/Val/{data_mode}-{name}-{self.config['anatomy_part'][i]}-pred.png")
+                    if include_mask:
+                        torchvision.utils.save_image(batch_split_gt[b_].float(), f"{self.saved_img_preds_dir}/Val/{data_mode}-{name}-{self.config['anatomy_part'][i]}-gt.png")    
                 
 
             # add batch predictions, ground truth and loss to metrics
             self.update_metrics(y_score_preds, y, classification_losses)
 
-    def run(self, train_loader, valid_loader):
+    def run(self, train_loader, valid_loader, extra_train_ds_loaders):
         # TODO : EDIT
         since = time.time()
 
@@ -241,6 +267,9 @@ class Trainer:
 
             # train epoch
             self.train_epoch(train_loader)
+            
+            for extra_train_loader in extra_train_ds_loaders:
+                self.train_epoch(extra_train_loader, include_mask=False)
 
             # validate and log on train data
             self.val_preds['epoch'].append(self.global_epoch)
@@ -248,6 +277,9 @@ class Trainer:
 
             # validate and log on train data
             self.validate_epoch(train_loader, data_mode='train')
+            
+            for extra_train_loader in extra_train_ds_loaders:
+                self.validate_epoch(extra_train_loader, data_mode='train', include_mask=False)
 
             self.log_metrics(train='train')
             self.reset_metrics()
