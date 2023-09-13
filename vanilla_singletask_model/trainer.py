@@ -86,19 +86,19 @@ class Trainer:
         for bodypart in self.config['anatomy_part']:
             self.models[bodypart].train()
 
-        self.train_preds['epoch'].append(self.global_epoch)
-        self.train_labels['epoch'].append(self.global_epoch)
-
-        for i, (names, X, y, mask) in enumerate(tqdm(data_loader)):
+        for i, batch in enumerate(tqdm(data_loader)):
+            
+            names, X, y = batch[0], batch[1], batch[2]
+            
             # move everything to cuda
             X = X.to(self.device)
             y = torch.stack(y).to(self.device)
-            mask = mask.to(self.device)
+            # mask = mask.to(self.device)
 
             for j, bodypart in enumerate(self.config['anatomy_part']):
                 y_pred = self.models[bodypart](X)
 
-                loss = self.criterion(y_pred, y[j].float())
+                loss = self.criterion(torch.flatten(y_pred), y[j].float())
 
                 # calculate loss and optimize model
                 self.models[bodypart].zero_grad()
@@ -131,16 +131,17 @@ class Trainer:
         for bodypart in self.config['anatomy_part']:
             self.models[bodypart].eval()
 
-        for i, (names, X, y, mask) in enumerate(tqdm(data_loader)):
+        for i, batch in enumerate(tqdm(data_loader)):
             y_preds = []
             losses = []
 
+            names, X, y = batch[0], batch[1], batch[2]
 
             with torch.no_grad():
                 # move everything to cuda
                 X = X.to(self.device)
                 y = torch.stack(y).to(self.device)
-                mask = mask.to(self.device)
+                # mask = mask.to(self.device)
 
                 for j, bodypart in enumerate(self.config['anatomy_part']):
                     # calculate y_pred
@@ -148,7 +149,7 @@ class Trainer:
                     y_pred = self.models[bodypart](X)
 
 
-                    loss = self.criterion(y_pred, y[j].float())
+                    loss = self.criterion(torch.flatten(y_pred), y[j].float())
                     y_preds.append(y_pred)
                     losses.append(loss.item())
 
@@ -166,22 +167,28 @@ class Trainer:
             self.update_metrics(y_preds, y, losses)
 
 
-    def run(self, train_loader, valid_loader):
+    def run(self, train_loader, valid_loader, extra_train_ds_loaders):
         # TODO : EDIT
         since = time.time()
 
-        saved_preds_dir = f'{wandb.run.dir}\saved_preds\\'
-        model_checkpoints_dir = f'{wandb.run.dir}\model_checkpoints\\'
+        saved_preds_dir = f'{wandb.run.dir}/saved_preds'
+        model_checkpoints_dir = f'{wandb.run.dir}/model_checkpoints'
 
         Path(saved_preds_dir).mkdir(parents=True, exist_ok=True)
         for bodypart in self.config['anatomy_part']:
-            Path(f'{model_checkpoints_dir}\\{bodypart}').mkdir(parents=True, exist_ok=True)
+            Path(f'{model_checkpoints_dir}/{bodypart}').mkdir(parents=True, exist_ok=True)
 
         for epoch in range(self.config['num_epochs']):
             print('Epoch:', epoch)
+            
+            self.train_preds['epoch'].append(self.global_epoch)
+            self.train_labels['epoch'].append(self.global_epoch)
 
             # train epoch
             self.train_epoch(train_loader)
+            
+            for extra_train_loader in extra_train_ds_loaders:
+                self.train_epoch(extra_train_loader)
 
             # validate and log on train data
             self.val_preds['epoch'].append(self.global_epoch)
@@ -189,6 +196,9 @@ class Trainer:
 
             # validate and log on train data
             self.validate_epoch(train_loader, data_mode='train')
+            
+            for extra_train_loader in extra_train_ds_loaders:
+                self.validate_epoch(extra_train_loader, data_mode='train')
 
             self.log_metrics(train='train')
             self.reset_metrics()
@@ -201,7 +211,7 @@ class Trainer:
             # # save the model's weights if BinaryAUROC is higher than previous
             if self.config['save_weights']:
                 for bodypart in self.config['anatomy_part']:
-                    save_checkpoint(state=self.models[bodypart], filename= f"{model_checkpoints_dir}{bodypart}\\model-{self.global_epoch}")
+                    save_checkpoint(state=self.models[bodypart], filename= f"{model_checkpoints_dir}/{bodypart}/model-{self.global_epoch}")
 
             self.global_epoch += 1
 
@@ -210,10 +220,10 @@ class Trainer:
         val_preds_df = pd.DataFrame.from_dict(self.val_preds)
         val_labels_df = pd.DataFrame.from_dict(self.val_labels)
 
-        train_preds_df.to_csv(f"{saved_preds_dir}train_preds.csv", index=False)
-        train_labels_df.to_csv(f"{saved_preds_dir}train_labels.csv", index=False)
-        val_preds_df.to_csv(f"{saved_preds_dir}val_preds.csv", index=False)
-        val_labels_df.to_csv(f"{saved_preds_dir}val_labels.csv", index=False)
+        train_preds_df.to_csv(f"{saved_preds_dir}/train_preds.csv", index=False)
+        train_labels_df.to_csv(f"{saved_preds_dir}/train_labels.csv", index=False)
+        val_preds_df.to_csv(f"{saved_preds_dir}/val_preds.csv", index=False)
+        val_labels_df.to_csv(f"{saved_preds_dir}/val_labels.csv", index=False)
 
         wandb.log({"Train predictions": wandb.Table(data=train_preds_df)})
         wandb.log({"Train labels": wandb.Table(data=train_labels_df)})
