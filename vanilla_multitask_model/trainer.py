@@ -86,14 +86,14 @@ class Trainer:
         # set model to train mode
         self.models.train()
 
-        self.train_preds['epoch'].append(self.global_epoch)
-        self.train_labels['epoch'].append(self.global_epoch)
-
-        for i, (names, X, y, mask) in enumerate(tqdm(data_loader)):
+        for i, batch in enumerate(tqdm(data_loader)):
+            
+            names, X, y = batch[0], [1], [2]
+            
             # move everything to cuda
             X = X.to(self.device)
             y = torch.stack(y).to(self.device)
-            mask = mask.to(self.device)
+            # mask = mask.to(self.device)
 
             y_preds = self.models(X)
 
@@ -136,15 +136,17 @@ class Trainer:
         # set model to evaluation mode
         self.models.eval()
 
-        for i, (names, X, y, mask) in enumerate(tqdm(data_loader)):
+        for i, batch in enumerate(tqdm(data_loader)):
             y_preds = []
             losses = []
 
+            names, X, y = batch[0], batch[1], batch[2]
+            
             with torch.no_grad():
                 # move everything to cuda
                 X = X.to(self.device)
                 y = torch.stack(y).to(self.device)
-                mask = mask.to(self.device)
+                # mask = mask.to(self.device)
 
                 # calculate y_pred
                 # y_pred = self.model(X).reshape(-1)
@@ -168,7 +170,7 @@ class Trainer:
             # add batch predictions, ground truth and loss to metrics
             self.update_metrics(y_preds, y, losses)
 
-    def run(self, train_loader, valid_loader):
+    def run(self, train_loader, valid_loader, extra_train_ds_loaders):
         # TODO : EDIT
         since = time.time()
 
@@ -181,9 +183,15 @@ class Trainer:
 
         for epoch in range(self.config['num_epochs']):
             print('Epoch:', epoch)
+            
+            self.train_preds['epoch'].append(self.global_epoch)
+            self.train_labels['epoch'].append(self.global_epoch)
 
             # train epoch
             self.train_epoch(train_loader)
+            
+            for extra_train_loader in extra_train_ds_loaders:
+                self.train_epoch(extra_train_loader)
 
             # validate and log on train data
             self.val_preds['epoch'].append(self.global_epoch)
@@ -191,6 +199,9 @@ class Trainer:
 
             # validate and log on train data
             self.validate_epoch(train_loader, data_mode='train')
+            
+            for extra_train_loader in extra_train_ds_loaders:
+                self.validate_epoch(extra_train_loader, data_mode='train')
 
             self.log_metrics(train='train')
             self.reset_metrics()
