@@ -20,17 +20,17 @@ class SteeperMSELoss(nn.Module):
         return self.coefficient * loss
     
 class WeightedSoftDiceLoss(nn.Module):
-    def __init__(self, config):
+    def __init__(self, v1):
         super(WeightedSoftDiceLoss, self).__init__()
         # 0 <= v1 <= v2 <= 1; v2 = 1 - v1;
-        self.v1 = config['weighted_soft_dice_v1']
+        self.v1 = v1
         self.v2 = 1 - self.v1
     def forward(self, inputs, targets, smooth=1):
         # Uncomment this if the final layer does not have an activation layer
         inputs = torch.sigmoid(inputs)
 
         inputs = inputs.view(-1)
-        targets = targets.view(-1)
+        targets = targets.contiguous().view(-1)
 
         W = (targets * (self.v2 - self.v1)) + self.v1
         G_hat = W * (2 * inputs - 1)
@@ -97,9 +97,22 @@ class DiceLoss(nn.Module):
 
 
 class InfluenceSegmentationLoss(nn.Module):
-    def __init__(self, weight=None, size_average=True):
+    def __init__(self, weight_dict=None, size_average=True):
         super(InfluenceSegmentationLoss, self).__init__()
+        self.weight_dict = weight_dict
+        self.size_average = size_average
+        
+        self.sub_criterion = DiceLoss()
+        
 
-    def forward(self, inputs, targets, smooth=1):
+    def forward(self, targets_list, inputs_list, smooth=1):
         # TODO: Implement forward call
-        pass
+        running_total = []
+        
+        for target in targets_list:
+            for input in inputs_list:
+                dice_loss = self.sub_criterion(input, target)
+                running_total.append(1-dice_loss)
+                
+        
+        return torch.tensor(running_total).mean()
