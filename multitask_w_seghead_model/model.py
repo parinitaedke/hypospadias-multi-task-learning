@@ -22,12 +22,14 @@ class DoubleConv(nn.Module):
 class Vanilla_Multitask_UNET_Segmentation_Model(nn.Module):
     def __init__(self, config, testing=False):
         super(Vanilla_Multitask_UNET_Segmentation_Model, self).__init__()
+        self.config = config
+        
         self.downs = nn.ModuleList()
         self.ups = nn.ModuleList()
 
-        in_channels = config["in_channels"]
+        in_channels = self.config["in_channels"]
         # Down part of UNET
-        for feature in config["UNET features"]:
+        for feature in self.config["UNET features"]:
             self.downs.append(DoubleConv(in_channels, feature))
             in_channels = feature
 
@@ -35,15 +37,15 @@ class Vanilla_Multitask_UNET_Segmentation_Model(nn.Module):
         self.pool = nn.MaxPool2d(kernel_size=2, stride=2)
 
         # Bottleneck layer
-        self.bottleneck = DoubleConv(config["UNET features"][-1], config["UNET features"][-1] * 2)
+        self.bottleneck = DoubleConv(self.config["UNET features"][-1], self.config["UNET features"][-1] * 2)
 
         # Up part of UNET
-        for feature in reversed(config["UNET features"]):
+        for feature in reversed(self.config["UNET features"]):
             self.ups.append(nn.ConvTranspose2d(feature*2, feature, kernel_size=2, stride=2))
             self.ups.append(DoubleConv(feature*2, feature))
 
         # Final convolution
-        self.final_conv = nn.Conv2d(config["UNET features"][0], config["out_channels"], kernel_size=1)
+        self.final_conv = nn.Conv2d(self.config["UNET features"][0], self.config["out_channels"], kernel_size=1)
 
         self.testing = testing
         self.dropout = nn.Dropout(p=0.5)
@@ -80,6 +82,63 @@ class Vanilla_Multitask_UNET_Segmentation_Model(nn.Module):
             nn.ReLU(),
             nn.Linear(in_features=64, out_features=1)
         )
+        
+        if self.config['hope_classfication_heads']:
+            
+            # Meatus position head
+            self.meatus_pos_head = nn.Sequential(
+                nn.LazyLinear(out_features=512),
+                nn.ReLU(),
+                nn.Linear(in_features=512, out_features=256),
+                nn.ReLU(),
+                nn.Linear(in_features=256, out_features=64),
+                nn.ReLU(),
+                nn.Linear(in_features=64, out_features=1)
+            )
+            
+            # Meatus shape head
+            self.meatus_shape_head = nn.Sequential(
+                nn.LazyLinear(out_features=512),
+                nn.ReLU(),
+                nn.Linear(in_features=512, out_features=256),
+                nn.ReLU(),
+                nn.Linear(in_features=256, out_features=64),
+                nn.ReLU(),
+                nn.Linear(in_features=64, out_features=1)
+            )
+            
+            # Glans shape head
+            self.glans_shape_head = nn.Sequential(
+                nn.LazyLinear(out_features=512),
+                nn.ReLU(),
+                nn.Linear(in_features=512, out_features=256),
+                nn.ReLU(),
+                nn.Linear(in_features=256, out_features=64),
+                nn.ReLU(),
+                nn.Linear(in_features=64, out_features=1)
+            )
+            
+            # Penile skin shape head
+            self.penile_skin_shape_head = nn.Sequential(
+                nn.LazyLinear(out_features=512),
+                nn.ReLU(),
+                nn.Linear(in_features=512, out_features=256),
+                nn.ReLU(),
+                nn.Linear(in_features=256, out_features=64),
+                nn.ReLU(),
+                nn.Linear(in_features=64, out_features=1)
+            )
+            
+            # Torsion head
+            self.torsion_head = nn.Sequential(
+                nn.LazyLinear(out_features=512),
+                nn.ReLU(),
+                nn.Linear(in_features=512, out_features=256),
+                nn.ReLU(),
+                nn.Linear(in_features=256, out_features=64),
+                nn.ReLU(),
+                nn.Linear(in_features=64, out_features=1)
+            )
 
 
     def forward(self, x):
@@ -108,6 +167,14 @@ class Vanilla_Multitask_UNET_Segmentation_Model(nn.Module):
         g_score = self.g_head(x.flatten(start_dim=1))
         m_score = self.m_head(x.flatten(start_dim=1))
         s_score = self.s_head(x.flatten(start_dim=1))
+        
+        
+        if self.config['hope_classfication_heads']:
+            meatus_pos_score = self.meatus_pos_head(x.flatten(start_dim=1))
+            meatus_shape_score = self.meatus_shape_head(x.flatten(start_dim=1))
+            glans_shape_score = self.glans_shape_head(x.flatten(start_dim=1))
+            penile_skin_shape_score = self.penile_skin_shape_head(x.flatten(start_dim=1))
+            torsion_score = self.torsion_head(x.flatten(start_dim=1))
 
         if self.testing:
             x = self.dropout(x)
@@ -128,5 +195,8 @@ class Vanilla_Multitask_UNET_Segmentation_Model(nn.Module):
         # Classifier
         x = self.final_conv(x)
 
-        return x, (g_score, m_score, s_score)
+        if self.config['hope_classification_heads']:
+            return x, (g_score, m_score, s_score), (meatus_pos_score, meatus_shape_score, glans_shape_score, penile_skin_shape_score, torsion_score)
+        else:
+            return x, (g_score, m_score, s_score)
 
