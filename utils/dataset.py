@@ -71,7 +71,7 @@ class HypospadiasDataset(Dataset):
         
         if self.include_masks:
             masks = []
-            for bodypart in self.config['anatomy_part']:
+            for bodypart in (self.config['anatomy_part'] + self.config['overlap_bodyparts']):
                 mask_path = os.path.join(self.mask_dir, img_name)
                 mask_path = [n for n in glob(f'{mask_path}*{bodypart.lower()}.*')]
 
