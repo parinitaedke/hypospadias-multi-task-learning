@@ -28,7 +28,7 @@ def get_transformations():
         'train': A.Compose([
             # A.PadIfNeeded(min_height=224, min_width=224),
             # A.RandomCrop(224, 224),
-            A.Resize(224, 224),
+            A.Resize(224, 224), # (224, 224)
             A.Rotate(limit=30),
             # A.RandomResizedCrop(224, 224, ratio=(1.0, 1.0), scale=(0.9, 1.0)),
             A.HorizontalFlip(),
@@ -36,7 +36,7 @@ def get_transformations():
             Apy.transforms.ToTensorV2()
         ]),
         'valid': A.Compose([
-            A.Resize(224, 224),
+            A.Resize(224, 224), # (224, 224)
             # A.Resize(256, 256),
             # A.CenterCrop(224, 224),
             A.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
@@ -123,20 +123,21 @@ def setup_criterion(config):
     elif config['loss'] == 'MT-dice-seghead-loss':
         # criterion1 = BCEWithLogitsLoss()
         criterion1 = DiceLoss()
-        criterion2 = SteeperMSELoss(coefficient=config['steeper_MSE_coeff'])
+        criterion2 = nn.MSELoss()
 
         criterion = [criterion1, criterion2]
     
     elif config['loss'] == 'MT-WSdice-seghead-loss':
         criterion1 = WeightedSoftDiceLoss(v1=config['weighted_soft_dice_v1'])
-        criterion2 = SteeperMSELoss(coefficient=config['steeper_MSE_coeff'])
+        criterion2 = nn.MSELoss()
         
         criterion = [criterion1, criterion2]
 
-    elif config['loss'] == 'MT-new-seghead-loss':
-        criterion1 = InfluenceSegmentationLoss()
-        criterion2 = SteeperMSELoss(coefficient=config['steeper_MSE_coeff'])
-        criterion = [criterion1, criterion2]
+    elif config['loss'] == 'MT-dice-overlap_penalty-seghead-loss':
+        criterion1 = DiceLoss()
+        criterion2 = nn.MSELoss()
+        criterion3 = InfluenceSegmentationLoss()
+        criterion = [criterion1, criterion2, criterion3]
 
     else:
         raise NotImplementedError(f'Unknown loss')
