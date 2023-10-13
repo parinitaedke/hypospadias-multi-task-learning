@@ -82,14 +82,10 @@ class Trainer:
         for bodypart in self.config['anatomy_part']:
             self.metrics[bodypart].reset()
 
-    def train_epoch(self, data_loader, include_mask=True):
+    def train_epoch(self, data_loader, include_mask=True, overlap_mask_penalty=False):
 
         # set model to train mode
         self.models.train()
-
-        if self.global_epoch not in self.train_preds['epoch'] and self.global_epoch not in self.train_labels['epoch']:
-            self.train_preds['epoch'].append(self.global_epoch)
-            self.train_labels['epoch'].append(self.global_epoch)
 
         for i, batch in enumerate(tqdm(data_loader)):
             if include_mask:
@@ -114,30 +110,33 @@ class Trainer:
                 # calculating the segmentation loss per mask type
                 lst_gt_mask = torch.split(mask, 1, dim=1)  # Splits on the channel dimension
                 
-                assert len(lst_gt_mask) == len(lst_gt_mask)
+                # assert len(lst_seg_pred) == len(lst_gt_mask)
                 
-                for i in range(len(lst_gt_mask)):
+                for i in range(len(lst_seg_pred)):
                     seg_loss = self.criterion[0](lst_seg_pred[i], lst_gt_mask[i])
                     seg_losses.append(seg_loss)
 
                 # calculating the segmentation loss for all masks
-                total_loss = torch.sum(torch.stack(seg_losses), dim=0)
+                total_segmentation_loss = torch.sum(torch.stack(seg_losses), dim=0)
                 
-                # zero gradient and optimize model with segmentation loss
-                self.models.zero_grad()
-                total_loss.backward(retain_graph=True)
-                self.optimizers.step()
-                
-                self.global_step += 1
-
+                # TODO: Add foreskin overlap penalty
+                if overlap_mask_penalty:
+                    overlap_loss = self.config['overlap_loss_weight'] * self.criterion[2](lst_gt_mask[len(lst_seg_pred):], lst_seg_pred[:len(lst_seg_pred)])
+                    
+                    # total_loss += overlap_loss
+                    total_segmentation_loss += overlap_loss
 
             # Calculating the classification loss
             for j, bodypart in enumerate(self.config['anatomy_part']):
                 loss = self.criterion[1](y_score_preds[j].flatten(), y[j].float())
                 classification_losses.append(loss)
 
-            total_loss = torch.sum(torch.stack(classification_losses), dim=0)
             total_classification_loss = torch.sum(torch.stack(classification_losses), dim=0)
+            
+            if include_mask:
+                total_loss = total_segmentation_loss + total_classification_loss
+            else:
+                total_loss = total_classification_loss
 
             # calculate loss and optimize model
             self.models.zero_grad()
@@ -161,7 +160,7 @@ class Trainer:
                     self.train_preds[f'{name}-{bodypart}'].append(name_pred.item())
                     self.train_labels[f'{name}-{bodypart}'].append(name_y.item())
 
-            # TODO: save the segmentation maps per epoch to see how they evolve
+            # save the segmentation maps per epoch to see how they evolve
             for i in range(len(lst_seg_pred)):
                 batch_split_pred = torch.split(lst_seg_pred[i], 1, dim=0)  # split by batches to get msk prediction for each sample for a specific bodypart
                 
@@ -181,7 +180,6 @@ class Trainer:
         self.schedulers.step()
 
     def validate_epoch(self, data_loader, data_mode='val', include_mask=True):
-        # TODO: EDIT THIS FOR ADDITIONAL TRAIN LOADERS
         
         # set model to evaluation mode
         self.models.eval()
@@ -212,9 +210,9 @@ class Trainer:
                 if include_mask:
                     lst_gt_mask = torch.split(mask, 1, dim=1)  # splits on the channel dimension
 
-                    assert len(lst_gt_mask) == len(lst_gt_mask)
+                    # assert len(lst_seg_pred) == len(lst_gt_mask)
 
-                    for i in range(len(lst_gt_mask)):
+                    for i in range(len(lst_seg_pred)):
                         seg_loss = self.criterion[0](lst_seg_pred[i], lst_gt_mask[i])
                         seg_losses.append(seg_loss)
                     
@@ -233,7 +231,7 @@ class Trainer:
                     self.val_preds[f'{data_mode}_{name}-{bodypart}'].append(y_score_preds[j][k].item())
                     self.val_labels[f'{data_mode}_{name}-{bodypart}'].append(y[j][k].item())
                     
-            # TODO: save the segmentation maps per epoch to see how they evolve
+            # save the segmentation maps per epoch to see how they evolve
             for i in range(len(lst_seg_pred)):
                 batch_split_pred = torch.split(lst_seg_pred[i], 1, dim=0)  # split by batches to get msk prediction for each sample for a specific bodypart
                 if include_mask:
@@ -264,9 +262,12 @@ class Trainer:
 
         for epoch in range(self.config['num_epochs']):
             print('Epoch:', epoch)
+            
+            self.train_preds['epoch'].append(self.global_epoch)
+            self.train_labels['epoch'].append(self.global_epoch)
 
             # train epoch
-            self.train_epoch(train_loader)
+            self.train_epoch(train_loader, overlap_mask_penalty=True)
             
             for extra_train_loader in extra_train_ds_loaders:
                 self.train_epoch(extra_train_loader, include_mask=False)
