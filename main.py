@@ -8,6 +8,8 @@ from utils.utils import get_transformations, build_model, setup_dataloader, setu
 from vanilla_singletask_model.trainer import Trainer as VSTMT
 from vanilla_multitask_model.trainer import Trainer as VMTMT
 from multitask_w_seghead_model.trainer import Trainer as MTUNetSegMT
+from multitask_w_seghead_model.component_trainer import Trainer as component_MTUNetSegMT
+
 from torch.optim.lr_scheduler import ExponentialLR
 
 # empty cuda cache
@@ -41,11 +43,13 @@ def run_experiment():
         'overlap_loss_weight': 10,
         #-------------------------------------------------------------------------------------------------------------------------------------------------------------
         # Model specifications
-        'model_type': 'multitask_UNET_segmentation', # 'multitask_UNET_segmentation', 'vanilla-singletask'
-        'model_name': 'vit_base',   # 'swin'/'vit' + '_'  + 'small', 'tiny', 'base' || 'resnet' + '18'/'50'
+        'model_type': 'component-multitask_UNET_segmentation', # 'multitask_UNET_segmentation', 'vanilla-singletask', 'vanilla-multitask'
+        'model_name': 'resnet50',   # 'swin'/'vit' + '_'  + 'small', 'tiny', 'base' || 'resnet' + '18'/'50'
         'lr': 0.01,
         'weight_decay': 0.001,
         'gamma': 0.85,
+        'hope_classification_heads': False,
+        'gms_classification_heads': True,
         #-------------------------------------------------------------------------------------------------------------------------------------------------------------
         # This is for the singletask model
         'num_classes': [1, 1, 1],           # 4/5; 
@@ -64,9 +68,10 @@ def run_experiment():
         'device': torch.device("cuda" if torch.cuda.is_available() else "cpu"),     # 'cuda'
         'pretrained': True,
         'data_transforms': data_transforms,
-        'data_path': "/home/pedke/dataset/datasets/30-August-23_split - no_special_chars", 
+        'data_path': "/home/pedke/dataset/datasets/15-October-23_split - no_special_chars", 
         'csv_path': "/home/pedke/dataset/datasheets/FINAL Copy of Classification - no_special_chars.xlsx",
         'extra_train_datasets': ['train-2'],
+        'extra_val_datasets': ['val-2'],
         'save_weights': True,
         'debug': False
     })
@@ -76,7 +81,7 @@ def run_experiment():
     models = build_model(wandb.config)
 
     # create train dataset and dataloaders
-    train_loader, valid_loader, test_loader, extra_train_ds_loaders = setup_dataloader(wandb.config, data_transforms)
+    train_loader, valid_loader, test_loader, extra_train_ds_loaders, extra_val_ds_loaders = setup_dataloader(wandb.config, data_transforms)
 
     # set up loss function
     criterion = setup_criterion(wandb.config)
@@ -94,7 +99,7 @@ def run_experiment():
 
 
         VSTMT(config=wandb.config, models=models, criterion=criterion, optimizers=optimizers, schedulers=schedulers).run(
-            train_loader, valid_loader, extra_train_ds_loaders
+            train_loader, valid_loader, extra_train_ds_loaders  # TODO: add extra_val_ds_loaders
         )
     elif wandb.config['model_type'].startswith('vanilla-multitask'):
         models = models.to(wandb.config['device'])
@@ -104,7 +109,7 @@ def run_experiment():
         schedulers = ExponentialLR(optimizers, gamma=wandb.config['gamma'])
 
         VMTMT(config=wandb.config, models=models, criterion=criterion, optimizers=optimizers,schedulers=schedulers).run(
-            train_loader, valid_loader, extra_train_ds_loaders
+            train_loader, valid_loader, extra_train_ds_loaders, extra_val_ds_loaders
         )
 
     elif wandb.config['model_type'].startswith('multitask_UNET_segmentation'):
@@ -114,14 +119,28 @@ def run_experiment():
         schedulers = ExponentialLR(optimizers, gamma=wandb.config['gamma'])
 
         MTUNetSegMT(config=wandb.config, models=models, criterion=criterion, optimizers=optimizers, schedulers=schedulers).run(
-            train_loader, valid_loader, extra_train_ds_loaders
+            train_loader, valid_loader, extra_train_ds_loaders, extra_val_ds_loaders
+        )
+    
+    elif wandb.config['model_type'].startswith('component-multitask_UNET_segmentation'):
+        
+        # set up optimizer and scheduler and put models on device
+        optimizers, schedulers = {}, {}
+        for component in ['encoder', 'decoder', 'classification_heads']:
+            models[component] = models[component].to(wandb.config['device'])
+            optimizers[component] = torch.optim.Adam(params=models[component].parameters(), lr=wandb.config['lr'],
+                                                    weight_decay=wandb.config['weight_decay'])
+            schedulers[component] = ExponentialLR(optimizers[component], gamma=wandb.config['gamma'])
+        
+        component_MTUNetSegMT(config=wandb.config, models=models, criterion=criterion, optimizers=optimizers,schedulers=schedulers).run(
+            train_loader, valid_loader, extra_train_ds_loaders, extra_val_ds_loaders
         )
 
 
 if __name__ == '__main__':
 
     # init wandb
-    wandb.init(project="dumb") # "new-loss-summation"
+    wandb.init(project="component-overlap-multitask-UNET-segmentation-model") # "new-loss-summation", "overlap-multitask-UNET-segmentation-model", "vanilla-multitask-model"
 
     # run experiment
     run_experiment()
