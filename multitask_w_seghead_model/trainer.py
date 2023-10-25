@@ -33,11 +33,21 @@ class Trainer:
         self.metrics = {}
         for bodypart in self.config['anatomy_part']:
             self.metrics[bodypart] = MetricCollection([MeanSquaredError(),
-                                                       MeanAbsoluteError(),
-                                                       ])
+                                                    MeanAbsoluteError(),
+                                                    ])
+        if self.config['hope_classification_heads']:
+            for hope_component in (['Position of meatus', 'Shape of meatus', 'Shape of glans', 'Shape of skin', 'Torsion']):
+                self.metrics[hope_component] = MetricCollection([MeanSquaredError(),
+                                                                MeanAbsoluteError(),
+                                                                ])
+            
         self.ys = []
         self.y_preds = []
         self.classification_losses = []
+        
+        if self.config['hope_classification_heads']:
+            self.ys_hope = []
+            self.y_hope_preds = []
 
         self.train_preds = {'epoch': []}
         self.train_labels = {'epoch': []}
@@ -45,7 +55,7 @@ class Trainer:
         self.val_preds = {'epoch': []}
         self.val_labels = {'epoch': []}
 
-    def update_metrics(self, y_pred, y, classification_loss):
+    def update_metrics(self, y_pred, y, y_hope_pred=None, y_hope=None, classification_loss=[]):
         # move variables to cpu
         y_pred = torch.stack(y_pred).squeeze(2).detach().cpu()
         y = y.detach().cpu()
@@ -53,11 +63,25 @@ class Trainer:
         # save predictions, targets and losses
         self.ys.append(y)
         self.y_preds.append(y_pred)
+        
+        if self.config['hope_classification_heads']:
+            y_hope_pred = torch.stack(y_hope_pred).squeeze(2).detach().cpu()
+            y_hope = y_hope.detach().cpu()
+            
+            self.ys_hope.append(y)
+            self.y_hope_preds.append(y_pred)
+        
+        classification_loss = [item.cpu() for item in classification_loss]
         self.classification_losses.append(classification_loss)
 
         # update metrics
         for i, bodypart in enumerate(self.config['anatomy_part']):
             self.metrics[bodypart](y_pred[i], y[i])
+        
+        if self.config['hope_classification_heads']:
+            for k, hope_component in enumerate(['Position of meatus', 'Shape of meatus', 'Shape of glans', 'Shape of skin', 'Torsion']):
+                self.metrics[hope_component](y_hope_pred[k], y_hope[k])
+
 
     def log_metrics(self, train):
 
@@ -73,6 +97,18 @@ class Trainer:
             # log metrics
             for metric in ['MeanSquaredError', 'MeanAbsoluteError']:
                 wandb.log({f"{train}_{bodypart}_{metric}": metrics[metric], 'epoch': self.global_epoch})
+                
+        if self.config['hope_classification_heads']:
+            for k, hope_component in enumerate(['Position of meatus', 'Shape of meatus', 'Shape of glans', 'Shape of skin', 'Torsion']):
+                wandb.log({f"{train}_{hope_component}_classification_loss": mean_bodypart_classification_losses[i+k], 'epoch': self.global_epoch})
+                
+                metrics = self.metrics[hope_component].compute()
+                
+                # log metrics
+                for metric in ['MeanSquaredError', 'MeanAbsoluteError']:
+                    wandb.log({f"{train}_{hope_component}_{metric}": metrics[metric], 'epoch': self.global_epoch})
+                
+            
 
     def reset_metrics(self):
         self.ys = []
@@ -81,6 +117,13 @@ class Trainer:
         
         for bodypart in self.config['anatomy_part']:
             self.metrics[bodypart].reset()
+            
+        if self.config['hope_classification_heads']:
+            self.ys_hope = []
+            self.y_hope_preds = []
+            
+            for hope_component in (['Position of meatus', 'Shape of meatus', 'Shape of glans', 'Shape of skin', 'Torsion']):
+                self.metrics[hope_component].reset()
 
     def train_epoch(self, data_loader, include_mask=True, overlap_mask_penalty=False):
 
@@ -89,21 +132,33 @@ class Trainer:
 
         for i, batch in enumerate(tqdm(data_loader)):
             if include_mask:
-                names, X, y, mask = batch
+                if self.config['hope_classification_heads']:
+                    names, X, y, y_hope, mask = batch
+                else:
+                    names, X, y, mask = batch
             else:
-                names, X, y = batch
+                if self.config['hope_classification_heads']:
+                    names, X, y, y_hope = batch
+                else:
+                    names, X, y = batch
                 
             # move everything to cuda
             X = X.to(self.device)
             y = torch.stack(y).to(self.device)
             
+            if self.config['hope_classification_heads']:
+                y_hope = torch.stack(y_hope).to(self.device)
+            
             if include_mask:
                 mask = mask.to(self.device)
 
-            y_seg_pred, y_score_preds = self.models(X)
+            if self.config['hope_classification_heads']:
+                y_seg_pred, y_score_preds, y_hope_score_preds = self.models(X)
+            else:
+                y_seg_pred, y_score_preds = self.models(X)
 
             classification_losses, seg_losses = [], []
- 
+
             lst_seg_pred = torch.split(y_seg_pred, 1, dim=1)  # Splits on the channel dimension
             
             if include_mask:
@@ -127,9 +182,16 @@ class Trainer:
                     total_segmentation_loss += overlap_loss
 
             # Calculating the classification loss
+            # GMS
             for j, bodypart in enumerate(self.config['anatomy_part']):
                 loss = self.criterion[1](y_score_preds[j].flatten(), y[j].float())
                 classification_losses.append(loss)
+            
+            # HOPE
+            if self.config['hope_classification_heads']:
+                for k, hope_component in enumerate(['Position of meatus', 'Shape of meatus', 'Shape of glans', 'Shape of skin', 'Torsion']):
+                    loss = self.criterion[1](y_hope_score_preds[k].flatten(), y_hope[k].float())
+                    classification_losses.append(loss)
 
             total_classification_loss = torch.sum(torch.stack(classification_losses), dim=0)
             
@@ -149,6 +211,7 @@ class Trainer:
             wandb.log({f'batch_classification_loss': total_classification_loss.item(), 'step': self.global_step})
 
             # save train preds
+            # GMS
             for j, bodypart in enumerate(self.config['anatomy_part']):
                 for k, name in enumerate(names):
                     if f'{name}-{bodypart}' not in self.train_preds:
@@ -159,6 +222,19 @@ class Trainer:
                     name_y = y[j][k]
                     self.train_preds[f'{name}-{bodypart}'].append(name_pred.item())
                     self.train_labels[f'{name}-{bodypart}'].append(name_y.item())
+            
+            # HOPE
+            if self.config['hope_classification_heads']:
+                for m, hope_component in enumerate(['Position of meatus', 'Shape of meatus', 'Shape of glans', 'Shape of skin', 'Torsion']):
+                    for n, name in enumerate(names):
+                        if f'{name}-{hope_component}' not in self.train_preds:
+                            self.train_preds[f'{name}-{hope_component}'] = []
+                            self.train_labels[f'{name}-{hope_component}'] = []
+
+                        name_pred = y_hope_score_preds[m][n]
+                        name_y = y_hope[m][n]
+                        self.train_preds[f'{name}-{hope_component}'].append(name_pred.item())
+                        self.train_labels[f'{name}-{hope_component}'].append(name_y.item())
 
             # save the segmentation maps per epoch to see how they evolve
             for i in range(len(lst_seg_pred)):
@@ -168,10 +244,10 @@ class Trainer:
                     batch_split_gt = torch.split(lst_gt_mask[i], 1, dim=0)
                 
                 for b_, name in enumerate(names):
-                    torchvision.utils.save_image(batch_split_pred[b_].sigmoid(), f"{self.saved_img_preds_dir}/Train/{name}-{self.config['anatomy_part'][i]}-pred.png")
+                    torchvision.utils.save_image(batch_split_pred[b_].sigmoid(), f"{self.saved_img_preds_dir}/Train/{name}/{self.config['anatomy_part'][i]}/pred-{self.global_epoch}.png")
                     
                     if include_mask:
-                        torchvision.utils.save_image(batch_split_gt[b_].float(), f"{self.saved_img_preds_dir}/Train/{name}-{self.config['anatomy_part'][i]}-gt.png")
+                        torchvision.utils.save_image(batch_split_gt[b_].float(), f"{self.saved_img_preds_dir}/Train/{name}/{self.config['anatomy_part'][i]}/gt.png")
                     
 
 
@@ -186,21 +262,33 @@ class Trainer:
 
         for i, batch in enumerate(tqdm(data_loader)):
             
-            if not include_mask and data_mode=='train':
-                names, X, y = batch
+            if not include_mask:
+                if self.config['hope_classification_heads']:
+                    names, X, y, y_hope = batch
+                else:
+                    names, X, y = batch
             else:
-                names, X, y, mask = batch
+                if self.config['hope_classification_heads']:
+                    names, X, y, y_hope, mask = batch
+                else:
+                    names, X, y, mask = batch
 
             with torch.no_grad():
                 # move everything to cuda
                 X = X.to(self.device)
                 y = torch.stack(y).to(self.device)
                 
-                if include_mask or not data_mode=='train':
+                if self.config['hope_classification_heads']:
+                    y_hope = torch.stack(y_hope).to(self.device)
+                
+                if include_mask:
                     mask = mask.to(self.device)
 
                 # calculate y_pred
-                y_seg_pred, y_score_preds = self.models(X)
+                if self.config['hope_classification_heads']:
+                    y_seg_pred, y_score_preds, y_hope_score_preds = self.models(X)
+                else:
+                    y_seg_pred, y_score_preds = self.models(X)
 
                 classification_losses, seg_losses = [], []
 
@@ -220,6 +308,11 @@ class Trainer:
                 for j, bodypart in enumerate(self.config['anatomy_part']):
                     loss = self.criterion[1](y_score_preds[j].flatten(), y[j].float())
                     classification_losses.append(loss.cpu())
+                    
+                if self.config['hope_classification_heads']:
+                    for k, hope_component in enumerate(['Position of meatus', 'Shape of meatus', 'Shape of glans', 'Shape of skin', 'Torsion']):
+                        loss = self.criterion[1](y_hope_score_preds[k].flatten(), y_hope[k].float())
+                        classification_losses.append(loss)
 
             # save val preds
             for j, bodypart in enumerate(self.config['anatomy_part']):
@@ -231,6 +324,17 @@ class Trainer:
                     self.val_preds[f'{data_mode}_{name}-{bodypart}'].append(y_score_preds[j][k].item())
                     self.val_labels[f'{data_mode}_{name}-{bodypart}'].append(y[j][k].item())
                     
+            # HOPE
+            if self.config['hope_classification_heads']:
+                for m, hope_component in enumerate(['Position of meatus', 'Shape of meatus', 'Shape of glans', 'Shape of skin', 'Torsion']):
+                    for n, name in enumerate(names):
+                        if f'{data_mode}_{name}-{hope_component}' not in self.val_preds:
+                            self.val_preds[f'{data_mode}_{name}-{hope_component}'] = []
+                            self.val_labels[f'{data_mode}_{name}-{hope_component}'] = []
+
+                        self.val_preds[f'{data_mode}_{name}-{hope_component}'].append(y_hope_score_preds[m][n].item())
+                        self.val_labels[f'{data_mode}_{name}-{hope_component}'].append(y_hope[m][n].item())
+                    
             # save the segmentation maps per epoch to see how they evolve
             for i in range(len(lst_seg_pred)):
                 batch_split_pred = torch.split(lst_seg_pred[i], 1, dim=0)  # split by batches to get msk prediction for each sample for a specific bodypart
@@ -238,15 +342,18 @@ class Trainer:
                     batch_split_gt = torch.split(lst_gt_mask[i], 1, dim=0)
                 
                 for b_, name in enumerate(names):
-                    torchvision.utils.save_image(batch_split_pred[b_].sigmoid(), f"{self.saved_img_preds_dir}/Val/{data_mode}-{name}-{self.config['anatomy_part'][i]}-pred.png")
+                    torchvision.utils.save_image(batch_split_pred[b_].sigmoid(), f"{self.saved_img_preds_dir}/Val/{data_mode}/{name}/{self.config['anatomy_part'][i]}/pred-{self.global_epoch}.png")
                     if include_mask:
-                        torchvision.utils.save_image(batch_split_gt[b_].float(), f"{self.saved_img_preds_dir}/Val/{data_mode}-{name}-{self.config['anatomy_part'][i]}-gt.png")    
+                        torchvision.utils.save_image(batch_split_gt[b_].float(), f"{self.saved_img_preds_dir}/Val/{data_mode}/{name}/{self.config['anatomy_part'][i]}/gt.png")    
                 
 
             # add batch predictions, ground truth and loss to metrics
-            self.update_metrics(y_score_preds, y, classification_losses)
+            if self.config['hope_classification_heads']:
+                self.update_metrics(y_score_preds, y, y_hope_score_preds, y_hope, classification_loss=classification_losses)
+            else:
+                self.update_metrics(y_score_preds, y, classification_loss=classification_losses)
 
-    def run(self, train_loader, valid_loader, extra_train_ds_loaders):
+    def run(self, train_loader, valid_loader, extra_train_ds_loaders, extra_val_ds_loaders):
         # TODO : EDIT
         since = time.time()
 
@@ -287,12 +394,19 @@ class Trainer:
 
             # validate and log on valid data
             self.validate_epoch(valid_loader, data_mode='val')
+            
+            for extra_val_loader in extra_val_ds_loaders:
+                self.validate_epoch(extra_val_loader, data_mode='val', include_mask=False)
+                
             self.log_metrics(train='valid')
             self.reset_metrics()
 
             # # save the model's weights if BinaryAUROC is higher than previous
             if self.config['save_weights']:
-                save_checkpoint(state=self.models, filename=f"{self.model_checkpoints_dir}/model-{self.global_epoch}")
+                if (epoch%5 == 0) or (self.config['num_epochs'] == epoch+1):
+                    # save_checkpoint(state=self.models, filename=f"{self.model_checkpoints_dir}/model-{self.global_epoch}")
+                    print("=> Saving checkpoint")
+                    torch.save(self.models.state_dict(), f"{self.model_checkpoints_dir}/model-{self.global_epoch}")
 
             self.global_epoch += 1
 
