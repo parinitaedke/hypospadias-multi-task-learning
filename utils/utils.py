@@ -15,9 +15,11 @@ from .dataset import HypospadiasDataset
 from vanilla_multitask_model.model import Vanilla_Multitask_Model
 from multitask_w_seghead_model.model import Vanilla_Multitask_UNET_Segmentation_Model
 
+from multitask_w_seghead_model.component_model import Encoder, Decoder, ClassificationHeads
+
 def save_checkpoint(state, filename="my_checkpoint.pth.tar"):
     print("=> Saving checkpoint")
-    torch.save(state, filename)
+    torch.save(state.state_dict(), filename)
 
 def load_checkpoint(checkpoint, model):
     print("=> Loading checkpoint")
@@ -80,6 +82,12 @@ def build_model(config):
 
     elif config['model_type'].startswith('multitask_UNET_segmentation'):
         models = Vanilla_Multitask_UNET_Segmentation_Model(config=config)
+    elif config['model_type'].startswith('component-multitask_UNET_segmentation'):
+        models = {}
+        
+        models['encoder'] = Encoder(config=config)
+        models['decoder'] = Decoder(config=config)
+        models['classification_heads'] = ClassificationHeads(config=config)
 
     return models
 
@@ -98,16 +106,23 @@ def setup_dataloader(config, transforms):
             extra_train_loader = DataLoader(extra_train_ds, batch_size=config["batch_size"], num_workers=config["num_workers"], pin_memory=config["pin_memory"], shuffle=True)
             
             extra_train_ds_loaders.append(extra_train_loader)
-            
-        
 
     val_ds = HypospadiasDataset(config=config, score_df=score_df, preprocessing=transforms['valid'], dataset_type='val')
     val_loader = DataLoader(val_ds, batch_size=config["batch_size"], num_workers=config["num_workers"], pin_memory=config["pin_memory"], shuffle=True)
+    
+    extra_val_ds_loaders = []
+    if any(config["extra_val_datasets"]):
+        for extra_val_ds_name in config["extra_val_datasets"]:
+            extra_val_ds = HypospadiasDataset(config=config, score_df=score_df, preprocessing=transforms['valid'], dataset_type=extra_val_ds_name, include_masks=False)
+            extra_val_loader = DataLoader(extra_val_ds, batch_size=config["batch_size"], num_workers=config["num_workers"], pin_memory=config["pin_memory"], shuffle=True)
+            
+            extra_val_ds_loaders.append(extra_val_loader)
+            
 
     test_ds = HypospadiasDataset(config=config, score_df=score_df, preprocessing=transforms['valid'], dataset_type='test')
     test_loader = DataLoader(test_ds, batch_size=config["batch_size"], num_workers=config["num_workers"], pin_memory=config["pin_memory"], shuffle=True)
 
-    return train_loader, val_loader, test_loader, extra_train_ds_loaders
+    return train_loader, val_loader, test_loader, extra_train_ds_loaders, extra_val_ds_loaders
 
 def setup_criterion(config):
     if config['loss'] == 'MSE':
