@@ -53,22 +53,43 @@ class HypospadiasDataset(Dataset):
             score_name = replace_name_dict[img_name]
         
         labels = []
-        for bodypart in self.config['anatomy_part']:
-            s = self.score_df.stack().str.contains(score_name, na=False)
-            img_row = self.score_df.iloc[[s[s].index[0][0]]]
+        if self.config['gms_classification_heads']:
+            for bodypart in self.config['anatomy_part']:
+                s = self.score_df.stack().str.contains(score_name, na=False)
+                img_row = self.score_df.iloc[[s[s].index[0][0]]]
 
-            score = img_row[f'{bodypart} Concensus'].item()
-            if np.isnan(score):
-                score = img_row[f'{bodypart} 1'].item()
+                score = img_row[f'{bodypart} Concensus'].item()
+                if pd.isna(score):
+                    score = img_row[f'{bodypart} 1'].item()
 
-            score = int(score)
-            img_label = score - 1
+                score = int(score)
+                img_label = score - 1
 
-            labels.append(img_label)
+                labels.append(img_label)
+        
+        
+        # Get HOPE score labels
+        hope_labels = []
+        if self.config['hope_classification_heads']:
+            for hope_component in ['Position of meatus', 'Shape of meatus', 'Shape of glans', 'Shape of skin', 'Torsion']:
+                s = self.score_df.stack().str.contains(score_name, na=False)
+                img_row = self.score_df.iloc[[s[s].index[0][0]]]
+
+                score = img_row[f'{hope_component} Concensus'].item()
+                if pd.isna(score) or isinstance(score, str):
+                    score = img_row[f'{hope_component} 2'].item()
+
+                score = int(score)
+                
+                if hope_component == 'Torsion':
+                    img_label = score
+                else:
+                    img_label = score - 1
+
+                hope_labels.append(img_label)   
 
         # Get the score part segmentation mask; read mask if available, else create
         # a mask with all zeros
-        
         if self.include_masks:
             masks = []
             for bodypart in (self.config['anatomy_part'] + self.config['overlap_bodyparts']):
@@ -112,12 +133,26 @@ class HypospadiasDataset(Dataset):
                 print(f'[2] img shape: {img.shape}')
                 print(f'[2] mask shape: {mask.shape}')
 
-            # return img_name, img (X), img_label (y), and mask
-            return img_name, img, labels, masks
+            if self.config['gms_classification_heads'] and not self.config['hope_classification_heads']:
+                # return img_name, img (X), img_label (y1), and mask
+                return img_name, img, labels, masks
+            elif not self.config['gms_classification_heads'] and self.config['hope_classification_heads']:
+                # return img_name, img (X), img_hope_label(y2), and mask
+                return img_name, img, hope_labels, masks
+            else:
+                # return img_name, img (X), img_label (y1), img_hope_label(y2), and mask
+                return img_name, img, labels, hope_labels, masks
 
         else:
             if self.config["debug"]:
                 print(f'[2] img shape: {img.shape}')
-
-            # return img_name, img (X), img_label (y)
-            return img_name, img, labels
+            
+            if self.config['gms_classification_heads'] and not self.config['hope_classification_heads']:
+                # return img_name, img (X), img_label (y1), and mask
+                return img_name, img, labels
+            elif not self.config['gms_classification_heads'] and self.config['hope_classification_heads']:
+                # return img_name, img (X), img_hope_label(y2), and mask
+                return img_name, img, hope_labels
+            else:
+                # return img_name, img (X), img_label (y1), img_hope_label(y2), and mask
+                return img_name, img, labels, hope_labels
