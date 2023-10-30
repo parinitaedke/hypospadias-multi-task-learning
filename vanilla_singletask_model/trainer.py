@@ -167,7 +167,7 @@ class Trainer:
             self.update_metrics(y_preds, y, losses)
 
 
-    def run(self, train_loader, valid_loader, extra_train_ds_loaders):
+    def run(self, train_loader, valid_loader, extra_train_ds_loaders, extra_val_ds_loaders):
         # TODO : EDIT
         since = time.time()
 
@@ -205,13 +205,18 @@ class Trainer:
 
             # validate and log on valid data
             self.validate_epoch(valid_loader, data_mode='val')
+            
+            for extra_val_loader in extra_val_ds_loaders:
+                self.validate_epoch(extra_val_loader, data_mode='val')
+                
             self.log_metrics(train='valid')
             self.reset_metrics()
 
             # # save the model's weights if BinaryAUROC is higher than previous
             if self.config['save_weights']:
-                for bodypart in self.config['anatomy_part']:
-                    save_checkpoint(state=self.models[bodypart], filename= f"{model_checkpoints_dir}/{bodypart}/model-{self.global_epoch}")
+                if (epoch%5 == 0) or (self.config['num_epochs'] == epoch+1):
+                    for bodypart in self.config['anatomy_part']:
+                        save_checkpoint(state=self.models[bodypart], filename= f"{model_checkpoints_dir}/{bodypart}/model-{self.global_epoch}")
 
             self.global_epoch += 1
 
