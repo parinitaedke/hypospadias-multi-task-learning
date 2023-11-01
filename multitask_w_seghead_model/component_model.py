@@ -109,46 +109,7 @@ class ClassificationHeads(nn.Module):
         
         self.config = config
         
-        # Classification heads
-        # G head
-        self.g_head = nn.Sequential(
-            # nn.LazyLinear(out_features=256),
-            # nn.ReLU(),
-            # # nn.Linear(in_features=512, out_features=256),
-            # # nn.ReLU(),
-            # # nn.Linear(in_features=512, out_features=64),
-            # # nn.ReLU(),
-            # nn.Linear(in_features=256, out_features=1)
-            
-            nn.LazyLinear(out_features=512),
-            nn.ReLU(),
-            nn.Linear(in_features=512, out_features=256),
-            nn.ReLU(),
-            nn.Linear(in_features=256, out_features=64),
-            nn.ReLU(),
-            nn.Linear(in_features=64, out_features=1)
-        )
-        # M head
-        self.m_head = nn.Sequential(
-            # nn.LazyLinear(out_features=256),
-            # nn.ReLU(),
-            # # nn.Linear(in_features=512, out_features=256),
-            # # nn.ReLU(),
-            # # nn.Linear(in_features=512, out_features=64),
-            # # nn.ReLU(),
-            # nn.Linear(in_features=256, out_features=1)
-            
-            nn.LazyLinear(out_features=512),
-            nn.ReLU(),
-            nn.Linear(in_features=512, out_features=256),
-            nn.ReLU(),
-            nn.Linear(in_features=256, out_features=64),
-            nn.ReLU(),
-            nn.Linear(in_features=64, out_features=1)
-        )
-
-        # S head
-        self.s_head = nn.Sequential(
+        self.classification_head = nn.Sequential(
             # nn.LazyLinear(out_features=256),
             # nn.ReLU(),
             # # nn.Linear(in_features=512, out_features=256),
@@ -166,78 +127,9 @@ class ClassificationHeads(nn.Module):
             nn.Linear(in_features=64, out_features=1)
         )
         
-        if self.config['hope_classification_heads']:
-            
-            # Meatus position head
-            self.meatus_pos_head = nn.Sequential(
-                nn.LazyLinear(out_features=256),
-                nn.ReLU(),
-                # nn.Linear(in_features=512, out_features=256),
-                # nn.ReLU(),
-                # nn.Linear(in_features=512, out_features=64),
-                # nn.ReLU(),
-                nn.Linear(in_features=256, out_features=1)
-            )
-            
-            # Meatus shape head
-            self.meatus_shape_head = nn.Sequential(
-                nn.LazyLinear(out_features=256),
-                nn.ReLU(),
-                # nn.Linear(in_features=512, out_features=256),
-                # nn.ReLU(),
-                # nn.Linear(in_features=512, out_features=64),
-                # nn.ReLU(),
-                nn.Linear(in_features=256, out_features=1)
-            )
-            
-            # Glans shape head
-            self.glans_shape_head = nn.Sequential(
-                nn.LazyLinear(out_features=256),
-                nn.ReLU(),
-                # nn.Linear(in_features=512, out_features=256),
-                # nn.ReLU(),
-                # nn.Linear(in_features=512, out_features=64),
-                # nn.ReLU(),
-                nn.Linear(in_features=256, out_features=1)
-            )
-            
-            # Penile skin shape head
-            self.penile_skin_shape_head = nn.Sequential(
-                nn.LazyLinear(out_features=256),
-                nn.ReLU(),
-                # nn.Linear(in_features=512, out_features=256),
-                # nn.ReLU(),
-                # nn.Linear(in_features=512, out_features=64),
-                # nn.ReLU(),
-                nn.Linear(in_features=256, out_features=1)
-            )
-            
-            # Torsion head
-            self.torsion_head = nn.Sequential(
-                nn.LazyLinear(out_features=256),
-                nn.ReLU(),
-                # nn.Linear(in_features=512, out_features=256),
-                # nn.ReLU(),
-                # nn.Linear(in_features=512, out_features=64),
-                # nn.ReLU(),
-                nn.Linear(in_features=256, out_features=1)
-            )
 
     def forward(self, x):
-        # Calculating the GMS classification heads
-        g_score = self.g_head(x.flatten(start_dim=1))
-        m_score = self.m_head(x.flatten(start_dim=1))
-        s_score = self.s_head(x.flatten(start_dim=1))
         
-        
-        if self.config['hope_classification_heads']:
-            meatus_pos_score = self.meatus_pos_head(x.flatten(start_dim=1))
-            meatus_shape_score = self.meatus_shape_head(x.flatten(start_dim=1))
-            glans_shape_score = self.glans_shape_head(x.flatten(start_dim=1))
-            penile_skin_shape_score = self.penile_skin_shape_head(x.flatten(start_dim=1))
-            torsion_score = self.torsion_head(x.flatten(start_dim=1))
-            
-            return (g_score, m_score, s_score), (meatus_pos_score, meatus_shape_score, glans_shape_score, penile_skin_shape_score, torsion_score)
+        score = self.classification_head(x.flatten(start_dim=1))
+        return score
 
-
-        return (g_score, m_score, s_score)
