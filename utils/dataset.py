@@ -1,3 +1,4 @@
+# IMPORTS
 import os
 import numpy as np
 import pandas as pd
@@ -7,6 +8,7 @@ from PIL import Image, ImageOps
 import torch
 from torch.utils.data import Dataset
 
+# this dict helps tackle issues with inconsistent naming for these examples across data files
 replace_name_dict = {
     'Excellent urethral plate (Intact prepuce circumcised)': 'Excellent urethral plate',
     'Flat plate but good spongionsum (TIP)': 'Flat plate but good spongionsum',
@@ -39,6 +41,7 @@ class HypospadiasDataset(Dataset):
         file_extention = Path(img_path).suffix
         img_name = Path(img_path).stem
 
+        # print image name (debug purposes)
         print(img_name)
 
         # Open the image in RGB mode
@@ -52,6 +55,7 @@ class HypospadiasDataset(Dataset):
         if img_name in replace_name_dict.keys():
             score_name = replace_name_dict[img_name]
         
+        # Get GMS score labels
         labels = []
         if self.config['gms_classification_heads']:
             for bodypart in self.config['anatomy_part']:
@@ -71,7 +75,7 @@ class HypospadiasDataset(Dataset):
         # Get HOPE score labels
         hope_labels = []
         if self.config['hope_classification_heads']:
-            for hope_component in ['Position of meatus', 'Shape of meatus', 'Shape of glans', 'Shape of skin', 'Torsion']:
+            for hope_component in self.config['hope_components']:
                 s = self.score_df.stack().str.contains(score_name, na=False)
                 img_row = self.score_df.iloc[[s[s].index[0][0]]]
 
@@ -93,6 +97,9 @@ class HypospadiasDataset(Dataset):
         if self.include_masks:
             masks = []
             for bodypart in (self.config['anatomy_part'] + self.config['overlap_bodyparts']):
+                if bodypart == "Urethral Plate":
+                    bodypart = "UrethralPlate"
+                
                 mask_path = os.path.join(self.mask_dir, img_name)
                 mask_path = [n for n in glob(f'{mask_path}*{bodypart.lower()}.*')]
 
@@ -126,6 +133,7 @@ class HypospadiasDataset(Dataset):
                 transformed = self.preprocessing(image=img)
                 img = transformed['image']
 
+        # return values depend on whether to include masks or not
         if self.include_masks:
             masks = torch.from_numpy(np.stack(masks, axis=2)).permute(2, 0, 1).byte()
 
@@ -136,9 +144,11 @@ class HypospadiasDataset(Dataset):
             if self.config['gms_classification_heads'] and not self.config['hope_classification_heads']:
                 # return img_name, img (X), img_label (y1), and mask
                 return img_name, img, labels, masks
+            
             elif not self.config['gms_classification_heads'] and self.config['hope_classification_heads']:
                 # return img_name, img (X), img_hope_label(y2), and mask
                 return img_name, img, hope_labels, masks
+            
             else:
                 # return img_name, img (X), img_label (y1), img_hope_label(y2), and mask
                 return img_name, img, labels, hope_labels, masks

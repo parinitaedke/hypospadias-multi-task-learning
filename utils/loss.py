@@ -1,11 +1,18 @@
+# IMPORTS
 import torch
 import torch.nn as nn
 import numpy as np
 import pandas as pd
 
 import torch.nn.functional as F
+from pytorch_grad_cam.utils.model_targets import ClassifierOutputTarget
 
+# CUSTOM LOSS FUNCTIONS
 class SteeperMSELoss(nn.Module):
+    """
+    This loss function intended to further the effects of the MSE loss by multiplying the MSE loss by a coefficient,
+    making the function 'steeper'.
+    """
     def __init__(self, coefficient):
         super(SteeperMSELoss, self).__init__()
 
@@ -16,10 +23,17 @@ class SteeperMSELoss(nn.Module):
         # target = torch.LongTensor(target)
         
         loss = self.sub_criterion(output, target)
-   
         return self.coefficient * loss
     
+
 class WeightedSoftDiceLoss(nn.Module):
+    """
+    This loss function gives a small weight to the background area of the label, so the background area will be 
+    added to the calculation when calculating dice loss.
+    
+    The loss function can include the negative sample regions of the image into the loss calculation and retains the 
+    advantage of the dice loss in the problem of the imbalanced distribution of the positive and negative samples.
+    """
     def __init__(self, v1):
         super(WeightedSoftDiceLoss, self).__init__()
         # 0 <= v1 <= v2 <= 1; v2 = 1 - v1;
@@ -45,6 +59,9 @@ class WeightedSoftDiceLoss(nn.Module):
 
 
 class DiceLoss(nn.Module):
+    """
+    This loss function computes the Dice score and returns the Dice loss (1 - Dice score)
+    """
     def __init__(self, weight=None, size_average=True):
         super(DiceLoss, self).__init__()
 
@@ -97,6 +114,12 @@ class DiceLoss(nn.Module):
 
 
 class InfluenceSegmentationLoss(nn.Module):
+    """
+    This loss function *currently* computes the dice loss across multiple segmentation maps.
+    
+    A way to further this loss function would be to include some form of weighting to allow for different segmentation
+    maps to have more/less influence on the score.
+    """
     def __init__(self, weight_dict=None, size_average=True):
         super(InfluenceSegmentationLoss, self).__init__()
         self.weight_dict = weight_dict
@@ -106,7 +129,6 @@ class InfluenceSegmentationLoss(nn.Module):
         
 
     def forward(self, targets_list, inputs_list, smooth=1):
-        # TODO: Implement forward call
         running_total = []
         
         for target in targets_list:
@@ -116,3 +138,37 @@ class InfluenceSegmentationLoss(nn.Module):
                 
         
         return torch.tensor(running_total).mean()
+    
+
+class AttentionLoss(nn.Module):
+    """
+    This loss function is adapted from M. Rizhko's Attention Loss work.
+    """
+    def __init__(self, cam):
+        super(AttentionLoss, self).__init__()
+
+        self.cam = cam
+
+    def forward(self, X, y, mask):
+        # calculate predictions
+        # y = y.sigmoid().data.gt(0.5)
+
+        # create attention maps
+        grayscale_cam = self.cam(X, y)
+        
+        # calculate loss
+        # NCHW --> single channel so NHW
+        n, h, w = X.shape[0], X.shape[2], X.shape[3]
+        
+        # (N, H, W)
+        mask = torch.squeeze(mask, 1)
+        a = torch.sum(mask, dim=1) # (n, w)
+        b = torch.sum(a, dim=1) # (n) 
+
+        mse_diff = (grayscale_cam - mask) ** 2
+        c = torch.sum(mse_diff, dim=1)
+        d = torch.sum(c, dim=1)
+        
+        loss = torch.sum(torch.where(b == 0, 0, d)) / n / h / w
+
+        return loss
