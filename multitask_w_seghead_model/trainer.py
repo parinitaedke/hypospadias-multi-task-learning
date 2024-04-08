@@ -1,3 +1,4 @@
+# IMPORTS
 import numpy as np
 import pandas as pd
 import wandb
@@ -374,7 +375,7 @@ class Trainer:
             self.train_labels['epoch'].append(self.global_epoch)
 
             # train epoch
-            self.train_epoch(train_loader, overlap_mask_penalty=True)
+            self.train_epoch(train_loader, overlap_mask_penalty=any(self.config['overlap_bodyparts']))
             
             for extra_train_loader in extra_train_ds_loaders:
                 self.train_epoch(extra_train_loader, include_mask=False)

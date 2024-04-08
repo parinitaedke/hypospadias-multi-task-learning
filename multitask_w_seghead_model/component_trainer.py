@@ -1,3 +1,4 @@
+# IMPORTS
 import numpy as np
 import pandas as pd
 import wandb
@@ -16,6 +17,10 @@ from PIL import Image
 import matplotlib.pyplot as plt
 from pathlib import Path
 
+# GLOBAL VARS
+ENCODER = 'encoder'
+DECODER = 'decoder'
+CLASSIFICATION_HEADS = 'classification_heads'
 
 class Trainer:
     def __init__(self, config, models, criterion, optimizers, schedulers, bodypart_lst):
@@ -91,9 +96,10 @@ class Trainer:
     def train_epoch(self, data_loader, include_mask=True, overlap_mask_penalty=False):
 
         # set model to train mode
-        for component in ['encoder', 'decoder']: #, 'classification_heads']:
+        for component in [ENCODER, DECODER]: #, 'classification_heads']:
             self.models[component].train()
         
+        # TODO: can just use self.bodypart_lst
         if self.config['hope_classification_heads'] and self.config['gms_classification_heads']:
             bodypart_lst = self.config['anatomy_part'] + self.config['hope_components']
         elif not self.config['hope_classification_heads'] and self.config['gms_classification_heads']:
@@ -102,7 +108,7 @@ class Trainer:
             bodypart_lst = self.config['hope_components']
         
         for subcomponent in bodypart_lst:
-            self.models['classification_heads'][subcomponent].train()
+            self.models[CLASSIFICATION_HEADS][subcomponent].train()
 
         for i, batch in enumerate(tqdm(data_loader)):
             if include_mask:
@@ -138,26 +144,26 @@ class Trainer:
             classification_losses = []
             y_score_preds = []
             for j, subcomponent in enumerate(bodypart_lst):
-                x, skip_connections = self.models['encoder'](X)
-                score_pred = self.models['classification_heads'][subcomponent](X)
+                x, skip_connections = self.models[ENCODER](X)
+                score_pred = self.models[CLASSIFICATION_HEADS][subcomponent](X)
                 y_score_preds.append(score_pred)
                 
                 loss = self.criterion[1](score_pred.flatten(), y_lst[j].float())
                 classification_losses.append(loss)
                 
-                self.models['classification_heads'][subcomponent].zero_grad()
-                self.models['encoder'].zero_grad()
+                self.models[CLASSIFICATION_HEADS][subcomponent].zero_grad()
+                self.models[ENCODER].zero_grad()
                 loss.backward() # retain_graph=True
-                self.optimizers['encoder'].step()
-                self.optimizers['classification_heads'][subcomponent].step()
+                self.optimizers[ENCODER].step()
+                self.optimizers[CLASSIFICATION_HEADS][subcomponent].step()
                 self.global_step += 2
 
             total_classification_loss = torch.sum(torch.stack(classification_losses), dim=0)
             
             # Second pass: Segmentation + encoder ------------------------------------------------------------------------
             # get mask + score predictions
-            x, skip_connections = self.models['encoder'](X)
-            y_seg_pred = self.models['decoder'](x, skip_connections)
+            x, skip_connections = self.models[ENCODER](X)
+            y_seg_pred = self.models[DECODER](x, skip_connections)
             
             seg_losses = []
             
@@ -187,11 +193,11 @@ class Trainer:
             
             # Decoder + Encoder backwards pass update
             if include_mask:
-                self.models['decoder'].zero_grad()
-                self.models['encoder'].zero_grad()
+                self.models[DECODER].zero_grad()
+                self.models[ENCODER].zero_grad()
                 total_segmentation_loss.backward()
-                self.optimizers['encoder'].step()
-                self.optimizers['decoder'].step()
+                self.optimizers[ENCODER].step()
+                self.optimizers[DECODER].step()
 
                 self.global_step +=2
 
@@ -226,17 +232,17 @@ class Trainer:
                         torchvision.utils.save_image(batch_split_gt[b_].float(), f"{self.saved_img_preds_dir}/Train/{name}/{self.config['anatomy_part'][i]}/gt.png")
 
         # log learning rate and update learning rate
-        wandb.log({f'encoder learning_rate': self.optimizers['encoder'].param_groups[0]['lr'], 'epoch': self.global_epoch})
-        for component in ['encoder', 'decoder']: #, 'classification_heads']:
+        wandb.log({f'{ENCODER} learning_rate': self.optimizers[ENCODER].param_groups[0]['lr'], 'epoch': self.global_epoch})
+        for component in [ENCODER, DECODER]: #, 'classification_heads']:
             self.schedulers[component].step()
         
         for subcomponent in bodypart_lst:
-            self.schedulers['classification_heads'][subcomponent].step()
+            self.schedulers[CLASSIFICATION_HEADS][subcomponent].step()
 
     def validate_epoch(self, data_loader, data_mode='val', include_mask=True):
         
         # set model to evaluation mode
-        for component in ['encoder', 'decoder']: #, 'classification_heads']:
+        for component in [ENCODER, DECODER]: #, 'classification_heads']:
             self.models[component].eval()
         
         if self.config['hope_classification_heads'] and self.config['gms_classification_heads']:
@@ -247,7 +253,7 @@ class Trainer:
             bodypart_lst = self.config['hope_components']
         
         for subcomponent in bodypart_lst:
-            self.models['classification_heads'][subcomponent].eval()
+            self.models[CLASSIFICATION_HEADS][subcomponent].eval()
 
 
         for i, batch in enumerate(tqdm(data_loader)):
@@ -283,12 +289,12 @@ class Trainer:
 
                 # calculate y_pred
                 # get mask + score predictions
-                x, skip_connections = self.models['encoder'](X)
-                y_seg_pred = self.models['decoder'](x, skip_connections)
+                x, skip_connections = self.models[ENCODER](X)
+                y_seg_pred = self.models[DECODER](x, skip_connections)
                 
                 y_score_preds = []
                 for j, subcomponent in enumerate(bodypart_lst):
-                    score_pred = self.models['classification_heads'][subcomponent](X)
+                    score_pred = self.models[CLASSIFICATION_HEADS][subcomponent](X)
                     y_score_preds.append(score_pred)
                     
 
