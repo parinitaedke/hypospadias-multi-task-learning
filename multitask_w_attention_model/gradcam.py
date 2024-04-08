@@ -1,5 +1,7 @@
+# IMPORTS
 import numpy as np
 import torch
+from pytorch_grad_cam.utils.model_targets import ClassifierOutputTarget, ClassifierOutputSoftmaxTarget
 
 
 def scale_cam(cam, size):
@@ -93,14 +95,21 @@ class GCAM:
         if self.compute_input_gradient:
             input_tensor = torch.autograd.Variable(input_tensor, requires_grad=True)
 
-        outputs = self.activations_and_grads(input_tensor).reshape(-1)
+        outputs = self.activations_and_grads(input_tensor)#.reshape(-1)
 
         # all values in targets that are 1 will stay 1, but 0 will become -1
-        targets = targets * 2 - 1
+        
+        # targets = targets * 2 - 1
+        targets = [ClassifierOutputSoftmaxTarget(category) for category in targets]
 
         if self.uses_gradients:
             self.model.zero_grad()
-            loss = sum(targets * outputs)
+            # loss = sum(targets * outputs)
+            # loss = torch.sum(torch.flatten(targets)*outputs)
+            lst = []
+            for target, output in zip(targets, outputs):
+                lst.append(target(output))
+            loss = sum(lst)
             loss.backward(retain_graph=True)
 
         cam = self.get_cam_image(self.activations_and_grads.activation, self.activations_and_grads.gradient)
